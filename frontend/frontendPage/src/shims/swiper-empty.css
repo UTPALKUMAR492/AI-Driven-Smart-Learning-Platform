@@ -1,0 +1,3 @@
+/* Empty CSS shim for swiper css imports (used when swiper isn't installed) */
+.fallback-swiper { }
+.fallback-swiper-slide { }

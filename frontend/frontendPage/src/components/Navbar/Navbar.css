@@ -1,0 +1,16 @@
+.brand { display:flex; align-items:center; gap:10px; text-decoration:none; }
+.brand-mark {
+  background: linear-gradient(135deg,var(--primary),var(--secondary));
+  color:white; width:40px; height:40px; border-radius:10px;
+  display:flex; align-items:center; justify-content:center; font-weight:700;
+  box-shadow: 0 8px 20px rgba(74,108,247,0.18);
+}
+.brand-text { font-weight:700; color:var(--text); font-size:18px; }
+.nav-link { color:var(--muted); text-decoration:none; padding:6px 8px; border-radius:8px; }
+.nav-link:hover { color:var(--primary); background:rgba(74,108,247,0.06); }
+
+.user-pill {
+  background: var(--primary);
+  color: white; padding:8px 12px; border-radius:8px;
+  font-weight:600; box-shadow: 0 6px 18px rgba(74,108,247,0.12);
+}

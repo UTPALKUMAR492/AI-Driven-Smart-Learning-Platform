@@ -1,0 +1,10 @@
+import React from 'react'
+import './Loader.css'
+
+export default function Loader(){
+  return (
+    <div className="loader-center">
+      <div className="spinner-border text-primary" role="status"></div>
+    </div>
+  )
+}

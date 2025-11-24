@@ -1,0 +1,4 @@
+.course-card { width: 280px; display:flex; flex-direction:column; justify-content:space-between; transition: transform .15s, box-shadow .15s; }
+.course-card:hover { transform: translateY(-6px); box-shadow: 0 10px 30px rgba(74,108,247,0.08); }
+.course-card h5 { margin:0; font-size:16px; }
+.badge { background: rgba(108,99,255,0.1); color: var(--secondary); padding:6px 10px; border-radius:8px; font-weight:600; font-size:13px; }
