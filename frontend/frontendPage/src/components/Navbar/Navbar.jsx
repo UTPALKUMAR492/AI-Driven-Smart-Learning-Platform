@@ -17,13 +17,26 @@ export default function Navbar(){
           <nav className="d-none d-md-flex align-items-center gap-3">
             <Link to="/" className="nav-link">Home</Link>
             <Link to="/courses" className="nav-link">Courses</Link>
+            <Link to="/quizzes" className="nav-link">Quizzes</Link>
           </nav>
         </div>
 
         <div className="d-flex align-items-center gap-3">
           {user ? (
             <>
-              <div className="user-pill">{user.name?.split(' ')[0]}</div>
+              <div className="user-pill">
+                <span className="role-indicator">{user.role === 'admin' ? '👑' : user.role === 'teacher' ? '👨‍🏫' : '🎓'}</span>
+                {user.name?.split(' ')[0]}
+              </div>
+              {user.role === 'admin' && (
+                <Link to="/admin-dashboard" className="btn btn-outline-secondary">Admin</Link>
+              )}
+              {user.role === 'teacher' && (
+                <Link to="/teacher-dashboard" className="btn btn-outline-secondary">Teacher Dashboard</Link>
+              )}
+              {user.role === 'student' && (
+                <Link to="/student-dashboard" className="btn btn-outline-secondary">My Learning</Link>
+              )}
               <button className="btn btn-outline-secondary" onClick={logout}>Logout</button>
             </>
           ) : (

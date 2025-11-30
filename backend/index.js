@@ -8,6 +8,7 @@ import authRoutes from "./routes/authRoutes.js";
 import courseRoutes from "./routes/courseRoutes.js";
 import quizRoutes from "./routes/quizRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
+import teacherRoutes from "./routes/teacherRoutes.js";
 import recommendationRoutes from "./routes/recommendationRoutes.js";
 import studentRoutes from "./routes/studentRoutes.js";
 
@@ -79,6 +80,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/courses", courseRoutes);
 app.use("/api/quiz", quizRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/teacher", teacherRoutes);
 app.use("/api/recommend", recommendationRoutes);
 app.use("/api/student", studentRoutes);
 
