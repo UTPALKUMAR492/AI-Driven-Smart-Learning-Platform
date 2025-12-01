@@ -30,12 +30,20 @@ export default function Login() {
 
       localStorage.setItem("token", res.data.token);
       setUser(res.data.user);
-      toast.success("Welcome back 🎉");
-
+      
+      // Redirect based on role
       const role = res.data.user.role;
-      if (role === "admin") navigate("/admin");
-      else if (role === "teacher") navigate("/teacher/dashboard");
-      else navigate("/dashboard");
+      console.log("Login successful - User role:", role);
+      toast.success(`Welcome back as ${role} 🎉`);
+      
+      // Use replace to prevent back navigation to login
+      if (role === "admin") {
+        navigate("/admin-dashboard", { replace: true });
+      } else if (role === "teacher") {
+        navigate("/teacher-dashboard", { replace: true });
+      } else {
+        navigate("/student-dashboard", { replace: true });
+      }
     } catch (err) {
       toast.error(err.response?.data?.message || "Invalid credentials");
     } finally {
