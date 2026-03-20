@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+import mongoose from "mongoose";
 
 const TopicSchema = new mongoose.Schema({
   title: String,
@@ -9,4 +9,4 @@ const TopicSchema = new mongoose.Schema({
   course: { type: mongoose.Schema.Types.ObjectId, ref: "Course" },
 });
 
-module.exports = mongoose.model("Topic", TopicSchema);
+export default mongoose.model("Topic", TopicSchema);

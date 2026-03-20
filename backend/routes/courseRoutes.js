@@ -12,10 +12,13 @@ import {
   getCategories,
   getFeaturedCourses,
   toggleWishlist,
-  getWishlist
+  getWishlist,
+  removeFromWishlist,
+  rateCourse
 } from "../controllers/courseController.js";
-import { protect } from "../middleware/authMiddleware.js";
+import { protect, optionalAuth } from "../middleware/authMiddleware.js";
 import { isAdmin, isTeacherOrAdmin } from "../middleware/roleMiddleware.js";
+import { setPublishStatus } from "../controllers/courseController.js";
 
 const router = express.Router();
 
@@ -23,7 +26,7 @@ const router = express.Router();
 router.get("/", getCourses);
 router.get("/categories", getCategories);
 router.get("/featured", getFeaturedCourses);
-router.get("/:id", getCourse);
+router.get("/:id", optionalAuth, getCourse);
 
 // Teacher/Admin routes - Create course (teachers can create their own)
 router.post("/", protect, isTeacherOrAdmin, createCourse);
@@ -42,8 +45,15 @@ router.put("/:courseId/progress/:lessonId", protect, updateProgress);
 // Reviews
 router.post("/:id/review", protect, addReview);
 
+// Rating
+router.post("/:id/rate", protect, rateCourse);
+
+// Admin publish/unpublish
+router.put('/:id/publish', protect, isAdmin, setPublishStatus);
+
 // Wishlist
 router.post("/:id/wishlist", protect, toggleWishlist);
+router.delete("/:id/wishlist", protect, removeFromWishlist);
 router.get("/user/wishlist", protect, getWishlist);
 
 export default router;

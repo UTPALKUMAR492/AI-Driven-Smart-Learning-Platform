@@ -7,15 +7,19 @@ import {
   getTeacherCourses,
   getTeacherQuizzes,
   getTeacherStudents,
+  getQuizResults,
   toggleCoursePublish,
   toggleQuizPublish,
   createCourse,
   deleteCourse,
   createQuiz,
-  deleteQuiz
+  deleteQuiz,
+  generateQuestionsAI
 } from '../../api/teacherApi'
+import api from '../../api/axiosConfig'
 import Loader from '../../components/Loader/Loader'
 import './TeacherDashboard.css'
+
 
 export default function TeacherDashboard() {
   const { user } = useContext(AuthContext)
@@ -26,9 +30,9 @@ export default function TeacherDashboard() {
   const [courses, setCourses] = useState([])
   const [quizzes, setQuizzes] = useState([])
   const [students, setStudents] = useState([])
-
-  // Course form state
+  const [questionBank, setQuestionBank] = useState([])
   const [showCourseForm, setShowCourseForm] = useState(false)
+
   const [courseData, setCourseData] = useState({
     title: '',
     description: '',
@@ -39,8 +43,43 @@ export default function TeacherDashboard() {
     thumbnail: '',
     requirements: [''],
     whatYouWillLearn: [''],
-    lessons: []
+    lessons: [],
+    isPublished: false
   })
+
+  // AI Question Generation Dialog State (MOVED INSIDE COMPONENT)
+  const [showAIGen, setShowAIGen] = useState(false);
+  const [aiGenTopic, setAIGenTopic] = useState('');
+  const [aiGenCourseId, setAIGenCourseId] = useState('');
+  const [aiGenNum, setAIGenNum] = useState(10);
+  const [aiGenLoading, setAIGenLoading] = useState(false);
+  // Handle AI Question Generation
+  const handleAIGenerate = async (e) => {
+    e.preventDefault()
+    if (!aiGenCourseId || !aiGenTopic) return toast.error('Select course and enter topic')
+    setAIGenLoading(true)
+    try {
+      const res = await api.post('/ai/question/generate-questions', { topic: aiGenTopic, courseId: aiGenCourseId, count: aiGenNum })
+      const data = res.data || {}
+      const questions = data.questions || []
+      if (!questions.length) {
+        toast.warn(data?.message || 'No valid questions were generated. Try a different prompt or course.')
+        return
+      }
+      toast.success(`Generated ${questions.length} questions`)
+      setShowAIGen(false)
+      setAIGenTopic('')
+      setAIGenCourseId('')
+      setAIGenNum(10)
+      // refresh dashboard to show any persisted questions
+      fetchDashboardData()
+    } catch (err) {
+      console.error('AI generate error', err)
+      toast.error(err?.response?.data?.message || 'AI generation failed')
+    } finally {
+      setAIGenLoading(false)
+    }
+  }
 
   // Quiz form state
   const [showQuizForm, setShowQuizForm] = useState(false)
@@ -50,8 +89,10 @@ export default function TeacherDashboard() {
     courseId: '',
     difficulty: 'Beginner',
     duration: 30,
-    questions: []
+    questions: [],
+    isPublished: false
   })
+
 
   // Current question being added
   const [currentQuestion, setCurrentQuestion] = useState({
@@ -68,6 +109,21 @@ export default function TeacherDashboard() {
     duration: 0,
     isFree: false
   })
+
+  // Quiz results modal state
+  const [quizResults, setQuizResults] = useState([])
+  const [resultsModalOpen, setResultsModalOpen] = useState(false)
+  const [selectedQuizTitle, setSelectedQuizTitle] = useState('')
+  // Inline results panel state
+  const [openQuizId, setOpenQuizId] = useState(null)
+  const [expandedResults, setExpandedResults] = useState({})
+  const [resultDetailsMap, setResultDetailsMap] = useState({})
+  const [resultsSortKey, setResultsSortKey] = useState('rank')
+  const [resultsSortDir, setResultsSortDir] = useState('asc')
+  const [resultsFilterMin, setResultsFilterMin] = useState(0)
+  const [resultDetail, setResultDetail] = useState(null)
+  const [resultDetailOpen, setResultDetailOpen] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
 
   useEffect(() => {
     // Skip if user is not loaded yet (handled by ProtectedRoute)
@@ -107,16 +163,27 @@ export default function TeacherDashboard() {
 
   const handleCourseSubmit = async (e) => {
     e.preventDefault()
-    if (!courseData.title || !courseData.description) {
-      return toast.error('Please fill all required fields')
+    if (!courseData.title || !courseData.description || !courseData.category) {
+      return toast.error('Please fill all required fields (title, description, category)')
+    }
+
+    // Ensure required fields and flatten price
+    const payload = {
+      title: courseData.title,
+      description: courseData.description,
+      category: courseData.category || 'Development',
+      level: courseData.level || 'Beginner',
+      language: courseData.language || 'English',
+      thumbnail: courseData.thumbnail || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800',
+      price: typeof courseData.price === 'object' ? courseData.price.amount || 0 : courseData.price || 0,
+      requirements: Array.isArray(courseData.requirements) ? courseData.requirements.filter(r => r.trim()) : [],
+      whatYouWillLearn: Array.isArray(courseData.whatYouWillLearn) ? courseData.whatYouWillLearn.filter(w => w.trim()) : [],
+      lessons: Array.isArray(courseData.lessons) ? courseData.lessons : [],
+      isPublished: !!courseData.isPublished
     }
 
     try {
-      await createCourse({
-        ...courseData,
-        requirements: courseData.requirements.filter(r => r.trim()),
-        whatYouWillLearn: courseData.whatYouWillLearn.filter(w => w.trim())
-      })
+      await createCourse(payload)
       toast.success('Course created successfully! 🎉')
       setShowCourseForm(false)
       resetCourseForm()
@@ -132,8 +199,19 @@ export default function TeacherDashboard() {
       return toast.error('Please add title and at least one question')
     }
 
+    // Ensure required fields for quiz
+    const payload = {
+      title: quizData.title,
+      description: quizData.description || '',
+      courseId: quizData.courseId || '',
+      difficulty: quizData.difficulty || 'Beginner',
+      duration: quizData.duration || 30,
+      questions: Array.isArray(quizData.questions) ? quizData.questions : [],
+      isPublished: !!quizData.isPublished
+    }
+
     try {
-      await createQuiz(quizData)
+      await createQuiz(payload)
       toast.success('Quiz created successfully! 🎉')
       setShowQuizForm(false)
       resetQuizForm()
@@ -142,6 +220,71 @@ export default function TeacherDashboard() {
       toast.error(error.message || 'Failed to create quiz')
     }
   }
+
+  useEffect(() => {
+    const loadBank = async () => {
+      if (!quizData.courseId) return setQuestionBank([])
+      try {
+          const res = await api.get(`/questions/course/${quizData.courseId}`)
+          let bank = res.data.questions || []
+          if ((!bank || bank.length === 0)) {
+            try {
+              const recentRes = await api.get('/questions/recent?limit=50')
+              bank = recentRes.data.questions || []
+            } catch (e) { console.warn('Failed to load recent questions fallback', e) }
+          }
+          setQuestionBank(bank)
+      } catch (err) {
+        console.error('Failed to load question bank', err)
+        setQuestionBank([])
+      }
+    }
+    loadBank()
+  }, [quizData.courseId])
+
+  // Load recent/generated questions for Questions tab
+  const fetchRecentQuestions = async () => {
+    try {
+        const res = await api.get('/questions/recent?limit=50')
+        setQuestionBank(res.data.questions || [])
+    } catch (e) {
+      console.warn('Failed to load recent questions', e)
+      setQuestionBank([])
+    }
+  }
+
+  const importQuestionToQuiz = (q) => {
+    setQuizData(prev => ({ ...prev, questions: [...prev.questions, { text: q.text, options: q.options, correctAnswer: q.correctAnswer }] }))
+  }
+
+  const editQuestionLocally = (id) => {
+    const q = questionBank.find(x => x._id === id)
+    if (!q) return toast.error('Question not found')
+    const newText = window.prompt('Edit question text', q.text || '')
+    if (newText === null) return
+    const optsCsv = window.prompt('Enter options separated by | (pipe)', (q.options || []).join(' | '))
+    if (optsCsv === null) return
+    const opts = optsCsv.split('|').map(s => s.trim()).filter(Boolean)
+    const correct = window.prompt('Enter correct option letter (A/B/C/D)', (() => {
+      const idx = (q.options||[]).findIndex(o => o === q.correctAnswer)
+      return idx >= 0 ? String.fromCharCode(65+idx) : 'A'
+    })())
+    if (correct === null) return
+    const correctIdx = ['A','B','C','D'].indexOf(String(correct).toUpperCase())
+    const updated = questionBank.map(x => x._id === id ? { ...x, text: newText, options: opts, correctAnswer: opts[correctIdx] || opts[0] || '' } : x)
+    setQuestionBank(updated)
+    toast.success('Question updated locally')
+  }
+
+  const renderOptionsList = (q) => (
+    <ul style={{ margin: '6px 0 0 0', paddingLeft: 18 }}>
+      {(q.options || []).slice(0,4).map((opt, i) => (
+        <li key={i} style={{ color: q.correctAnswer === opt ? '#0b7' : '#333' }}>
+          <strong style={{ marginRight: 8 }}>{String.fromCharCode(65 + i)}.</strong>{opt}
+        </li>
+      ))}
+    </ul>
+  )
 
   const handleTogglePublish = async (courseId) => {
     try {
@@ -183,6 +326,79 @@ export default function TeacherDashboard() {
     } catch (error) {
       toast.error('Failed to delete quiz')
     }
+  }
+
+  const openResults = async (quiz) => {
+    try {
+      // toggle: close if same quiz clicked
+      if (openQuizId === quiz._id) {
+        setOpenQuizId(null)
+        setQuizResults([])
+        setSelectedQuizTitle('')
+        return
+      }
+      setSelectedQuizTitle(quiz.title || 'Quiz Results')
+      const data = await getQuizResults(quiz._id)
+      setQuizResults(data || [])
+      setOpenQuizId(quiz._id)
+    } catch (err) {
+      toast.error(err?.message || 'Could not load results')
+    }
+  }
+
+  const toggleResultExpand = async (resultId) => {
+    // if already expanded, collapse
+    if (expandedResults[resultId]) {
+      setExpandedResults(prev => ({ ...prev, [resultId]: false }))
+      return
+    }
+
+    // if details already fetched, just expand
+    if (resultDetailsMap[resultId]) {
+      setExpandedResults(prev => ({ ...prev, [resultId]: true }))
+      return
+    }
+
+    // fetch detail and expand
+    try {
+      setDetailLoading(true)
+      const res = await getResultDetails(resultId)
+      setResultDetailsMap(prev => ({ ...prev, [resultId]: res }))
+      setExpandedResults(prev => ({ ...prev, [resultId]: true }))
+    } catch (e) {
+      console.error('Could not fetch result detail', e)
+      toast.error('Could not load result details')
+    } finally { setDetailLoading(false) }
+  }
+
+  const exportResultsCSV = (rows) => {
+    if (!rows || rows.length === 0) return toast.info('No results to export')
+    const headers = ['rank','name','email','score','total','percentage','completedAt']
+    const csv = [headers.join(',')].concat(rows.map(r => [r.rank, '"'+(r.user?.name||'')+'"', r.user?.email || '', r.score, r.total, r.percentage, '"'+new Date(r.completedAt).toISOString()+'"'].join(','))).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${selectedQuizTitle.replace(/\s+/g,'_') || 'quiz'}_results.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const sortedFilteredResults = () => {
+    let rows = Array.isArray(quizResults) ? [...quizResults] : []
+    // filter
+    if (resultsFilterMin) rows = rows.filter(r => (r.percentage || 0) >= Number(resultsFilterMin))
+    // sort
+    rows.sort((a,b) => {
+      const dir = resultsSortDir === 'asc' ? 1 : -1
+      if (resultsSortKey === 'percentage') return dir * ((a.percentage||0) - (b.percentage||0))
+      if (resultsSortKey === 'score') return dir * ((a.score||0) - (b.score||0))
+      if (resultsSortKey === 'name') return dir * ((a.user?.name||'').localeCompare(b.user?.name||''))
+      return dir * ((a.rank||0) - (b.rank||0))
+    })
+    return rows
   }
 
   const addQuestion = () => {
@@ -253,6 +469,95 @@ export default function TeacherDashboard() {
 
   return (
     <div className="teacher-dashboard">
+      
+
+      {/* AI Generate Questions Dialog */}
+      {showAIGen && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3>AI Generate Questions</h3>
+            <form onSubmit={handleAIGenerate}>
+              <label>Course:
+                <select value={aiGenCourseId} onChange={e => setAIGenCourseId(e.target.value)} required>
+                  <option value="">Select Course</option>
+                  {courses.map(c => <option key={c._id} value={c._id}>{c.title}</option>)}
+                </select>
+              </label>
+              <label>Topic or Paper Description:
+                <textarea value={aiGenTopic} onChange={e => setAIGenTopic(e.target.value)} required rows={3} />
+              </label>
+              <label>Number of Questions:
+                <input type="number" min={1} max={30} value={aiGenNum} onChange={e => setAIGenNum(Number(e.target.value))} />
+              </label>
+              <div className="modal-actions">
+                <button type="submit" disabled={aiGenLoading}>{aiGenLoading ? 'Generating...' : 'Generate & Save'}</button>
+                <button type="button" className="btn-secondary" onClick={() => setShowAIGen(false)}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* When creating a quiz show question bank import list */}
+      {activeTab === 'quizzes' && questionBank.length > 0 && (
+        <div className="form-section">
+          <h3>Question Bank (import into quiz)</h3>
+          <div className="questions-list">
+              {questionBank.map((q) => (
+              <div key={q._id} className="question-item">
+                <div style={{ flex: 1 }}>
+                  <strong>{q.text}</strong>
+                  {renderOptionsList(q)}
+                </div>
+                <div>
+                  <button type="button" className="btn-add" onClick={() => importQuestionToQuiz(q)}>Add to Quiz</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* Questions Tab - recent/generated questions */}
+      {activeTab === 'questions' && (
+        <div className="form-section">
+          <h3>Generated / Recent Questions</h3>
+          {questionBank.length === 0 ? (
+            <div>No generated questions yet.</div>
+          ) : (
+            <div className="questions-list">
+              {questionBank.map((q) => (
+                <div key={q._id} className="question-item">
+                  <div style={{ flex: 1 }}>
+                    <strong>{q.text}</strong>
+                    {renderOptionsList(q)}
+                    <div style={{ fontSize: 12, color: '#777' }}>Course: {q.course || '—'} • Published: {q.published ? 'Yes' : 'No'}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <button type="button" className="btn-add" onClick={() => importQuestionToQuiz(q)}>Add to Quiz</button>
+                    <button type="button" className="btn-secondary" onClick={() => editQuestionLocally(q._id)}>Edit</button>
+                    {!q.published && (
+                        <button type="button" className="btn-primary" onClick={async () => {
+                          try {
+                            await api.post(`/questions/${q._id}/publish`)
+                            toast.success('Question published')
+                            fetchRecentQuestions()
+                          } catch (err) { toast.error('Could not publish question') }
+                        }}>Publish</button>
+                    )}
+                    <button type="button" className="btn-danger" onClick={async () => {
+                      if (!window.confirm('Delete this question?')) return
+                      try {
+                          await api.delete(`/questions/${q._id}`)
+                          toast.success('Question deleted')
+                          fetchRecentQuestions()
+                        } catch (err) { toast.error('Could not delete question') }
+                    }}>Delete</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {/* Header */}
       <div className="teacher-header-section">
         <div className="container">
@@ -268,11 +573,24 @@ export default function TeacherDashboard() {
             </div>
           </div>
           <div className="dashboard-tabs">
-            <button className={`tab ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}>
-              📊 Overview
+            <button className="ai-gen-btn" onClick={() => setShowAIGen(true)} style={{ float: 'right', background: '#4A6CF7', color: '#fff', borderRadius: 4, padding: '6px 14px', marginLeft: 8 }}>
+              🤖 AI Generate Questions
+            </button>
+            <button
+              className={`tab ${activeTab === 'overview' ? 'active' : ''}`}
+              onClick={() => setActiveTab('overview')}
+            >
+              Overview
             </button>
             <button className={`tab ${activeTab === 'courses' ? 'active' : ''}`} onClick={() => setActiveTab('courses')}>
               📚 My Courses ({courses.length})
+            </button>
+            <button
+              className={`tab ${activeTab === 'questions' ? 'active' : ''}`}
+              onClick={() => { setActiveTab('questions'); fetchRecentQuestions(); }}
+            >
+              <span className="icon">❓</span>
+              Questions
             </button>
             <button className={`tab ${activeTab === 'quizzes' ? 'active' : ''}`} onClick={() => setActiveTab('quizzes')}>
               📝 My Quizzes ({quizzes.length})
@@ -314,7 +632,7 @@ export default function TeacherDashboard() {
               <div className="stat-card">
                 <div className="stat-icon revenue">💰</div>
                 <div className="stat-info">
-                  <h3>${stats?.totalRevenue?.toLocaleString() || 0}</h3>
+                  <h3>₹ {stats?.totalRevenue?.toLocaleString() || 0}</h3>
                   <p>Total Revenue</p>
                 </div>
               </div>
@@ -392,6 +710,12 @@ export default function TeacherDashboard() {
                       />
                     </div>
                     <div className="form-group full-width">
+                    <div className="form-group" style={{ alignSelf: 'center' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <input type="checkbox" checked={courseData.isPublished} onChange={(e) => setCourseData(prev => ({ ...prev, isPublished: e.target.checked }))} />
+                        <span>Publish now</span>
+                      </label>
+                    </div>
                       <label>Description *</label>
                       <textarea
                         className="form-textarea"
@@ -431,7 +755,7 @@ export default function TeacherDashboard() {
                       </select>
                     </div>
                     <div className="form-group">
-                      <label>Price ($)</label>
+                      <label>Price (₹)</label>
                       <input
                         type="number"
                         className="form-input"
@@ -481,14 +805,82 @@ export default function TeacherDashboard() {
                           />
                         </div>
                         <div className="form-group">
-                          <label>Video URL</label>
+                          <label>Video</label>
                           <input
-                            type="url"
+                            type="file"
+                            accept="video/*"
                             className="form-input"
-                            placeholder="https://example.com/video.mp4"
-                            value={currentLesson.videoUrl}
-                            onChange={(e) => setCurrentLesson(prev => ({ ...prev, videoUrl: e.target.value }))}
+                            onChange={async (e) => {
+                              const file = e.target.files[0];
+                              if (!file) return;
+                                // Client-side size check (500MB)
+                                const MAX_VIDEO = 500 * 1024 * 1024;
+                                if (file.size > MAX_VIDEO) {
+                                  toast.error('Video file too large. Max 500MB allowed.');
+                                  return;
+                                }
+                              const formData = new FormData();
+                              formData.append('video', file);
+                              try {
+                                  const resp = await api.post('/upload/video', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+                                  const data = resp.data
+                                  if (data.url) {
+                                    setCurrentLesson(prev => ({ ...prev, videoUrl: data.url }));
+                                    toast.success('Video uploaded!');
+                                  } else {
+                                    toast.error(data.message || 'Upload failed');
+                                  }
+                                } catch (err) {
+                                  toast.error('Upload failed');
+                                }
+                            }}
                           />
+                          {currentLesson.videoUrl && (
+                            <div style={{ fontSize: '0.9em', color: '#059669', marginTop: 4 }}>Uploaded: {currentLesson.videoUrl}</div>
+                          )}
+                        </div>
+                        <div className="form-group">
+                          <label>Lesson Notes (text or PDF)</label>
+                          <textarea
+                            className="form-input"
+                            placeholder="Paste lesson notes here or upload a PDF below."
+                            value={currentLesson.notes || ''}
+                            onChange={e => setCurrentLesson(prev => ({ ...prev, notes: e.target.value }))}
+                            rows={3}
+                          />
+                          <input
+                            type="file"
+                            accept="application/pdf"
+                            className="form-input"
+                            style={{ marginTop: 4 }}
+                            onChange={async (e) => {
+                              const file = e.target.files[0];
+                              if (!file) return;
+                              // Client-side size check (20MB)
+                              const MAX_NOTES = 20 * 1024 * 1024;
+                              if (file.size > MAX_NOTES) {
+                                toast.error('Notes file too large. Max 20MB allowed.');
+                                return;
+                              }
+                              const formData = new FormData();
+                              formData.append('notes', file);
+                              try {
+                                  const resp = await api.post('/upload/notes', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+                                  const data = resp.data
+                                  if (data.url) {
+                                    setCurrentLesson(prev => ({ ...prev, notes: data.url }));
+                                    toast.success('Notes uploaded!');
+                                  } else {
+                                    toast.error(data.message || 'Upload failed');
+                                  }
+                                } catch (err) {
+                                  toast.error('Upload failed');
+                                }
+                            }}
+                          />
+                          {currentLesson.notes && typeof currentLesson.notes === 'string' && currentLesson.notes.endsWith('.pdf') && (
+                            <div style={{ fontSize: '0.9em', color: '#059669', marginTop: 4 }}>PDF uploaded: {currentLesson.notes}</div>
+                          )}
                         </div>
                         <div className="form-group">
                           <label className="checkbox-label">
@@ -527,10 +919,10 @@ export default function TeacherDashboard() {
             <div className="courses-table">
               <div className="table-header">
                 <div className="th">Course</div>
+                <div className="th">Category</div>
                 <div className="th">Students</div>
                 <div className="th">Rating</div>
-                <div className="th">Status</div>
-                <div className="th">Actions</div>
+                    <div className="th">Status</div>
               </div>
               {courses.length > 0 ? courses.map((course) => (
                 <div key={course._id} className="table-row">
@@ -538,9 +930,10 @@ export default function TeacherDashboard() {
                     <img src={course.thumbnail || 'https://via.placeholder.com/60x40'} alt={course.title} className="course-thumb" />
                     <div className="course-info">
                       <span className="course-name">{course.title}</span>
-                      <span className="course-meta">{course.lessons?.length || 0} lessons • {course.level}</span>
+                      <span className="course-meta">{course.totalLessons || course.lessons?.length || 0} lessons • {course.level}</span>
                     </div>
                   </div>
+                  <div className="td">{course.category || '-'}</div>
                   <div className="td">{course.studentsEnrolled || 0}</div>
                   <div className="td">⭐ {course.rating?.toFixed(1) || '0.0'}</div>
                   <div className="td">
@@ -736,6 +1129,7 @@ export default function TeacherDashboard() {
                     <button className="btn-action" title="Toggle Publish" onClick={() => handleToggleQuizPublish(quiz._id)}>
                       {quiz.isPublished ? '📤' : '📥'}
                     </button>
+                    <button className="btn-action" title="View Results" onClick={() => openResults(quiz)}>🏆</button>
                     <button className="btn-action delete" title="Delete" onClick={() => handleDeleteQuiz(quiz._id)}>🗑️</button>
                   </div>
                 </div>
@@ -780,6 +1174,169 @@ export default function TeacherDashboard() {
                   <p>No students enrolled yet.</p>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+        {/* Results Modal */}
+        {resultsModalOpen && (
+          <div className="modal-overlay">
+            <div className="modal-content">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3>{selectedQuizTitle}</h3>
+                <button className="btn-close" onClick={() => setResultsModalOpen(false)}>×</button>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                {quizResults.length === 0 ? (
+                  <div>No results yet.</div>
+                ) : (
+                  <div>
+                    <div style={{ marginBottom: 8, color: '#6b7280' }}>
+                      {quizResults[0]?.courseTitle ? (`Course: ${quizResults[0].courseTitle}`) : ''}
+                      {quizResults[0]?.courseCategory ? (` • Category: ${quizResults[0].courseCategory}`) : ''}
+                    </div>
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 8 }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        Sort by:
+                        <select value={resultsSortKey} onChange={e => setResultsSortKey(e.target.value)}>
+                          <option value="rank">Rank</option>
+                          <option value="percentage">Percentage</option>
+                          <option value="score">Score</option>
+                          <option value="name">Name</option>
+                        </select>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        Direction:
+                        <select value={resultsSortDir} onChange={e => setResultsSortDir(e.target.value)}>
+                          <option value="asc">Asc</option>
+                          <option value="desc">Desc</option>
+                        </select>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        Min %:
+                        <input type="number" min={0} max={100} value={resultsFilterMin} onChange={e => setResultsFilterMin(e.target.value)} style={{ width: 80 }} />
+                      </label>
+                      <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                        <button className="btn-outline" onClick={() => setResultsFilterMin(0)}>Clear Filter</button>
+                        <button className="btn-primary" onClick={() => exportResultsCSV(sortedFilteredResults())}>Export CSV</button>
+                      </div>
+                    </div>
+
+                    <div className="results-list">
+                      <div className="table-header">
+                        <div className="th">Rank</div>
+                        <div className="th">Student</div>
+                        <div className="th">Email</div>
+                        <div className="th">Score</div>
+                        <div className="th">%</div>
+                        <div className="th">Status</div>
+                        <div className="th">Completed</div>
+                      </div>
+                      {sortedFilteredResults().map(r => (
+                        <React.Fragment key={r._id}>
+                          <div className="table-row result-row" onClick={() => toggleResultExpand(r._id)} style={{ cursor: 'pointer' }}>
+                            <div className="td">{r.rank}</div>
+                            <div className="td student-cell">
+                              <img src={r.user?.avatar || `https://ui-avatars.com/api/?name=${r.user?.name}&background=667eea&color=fff`} alt={r.user?.name} className="student-avatar" />
+                              <span>{r.user?.name}</span>
+                            </div>
+                            <div className="td">{r.user?.email || '-'}</div>
+                            <div className="td">{r.score} / {r.total}</div>
+                            <div className="td">{r.percentage}%</div>
+                            <div className="td">{(typeof r.percentage !== 'undefined' && typeof r.passingScore !== 'undefined') ? (r.percentage >= r.passingScore ? <span style={{color:'#10b981'}}>Pass</span> : <span style={{color:'#ef4444'}}>Fail</span>) : '-'}</div>
+                            <div className="td">{new Date(r.completedAt).toLocaleString()}</div>
+                          </div>
+
+                          {expandedResults[r._id] && (
+                            <div className="table-row result-detail-row">
+                              <div className="td" style={{ gridColumn: '1 / -1', padding: '12px 16px' }}>
+                                {detailLoading && !resultDetailsMap[r._id] ? (
+                                  <div>Loading details…</div>
+                                ) : resultDetailsMap[r._id] ? (
+                                  <div>
+                                    <div style={{ marginBottom: 8 }}><strong>Student:</strong> {resultDetailsMap[r._id].userId?.name} • {resultDetailsMap[r._id].userId?.email}</div>
+                                    <div style={{ marginBottom: 8 }}><strong>Score:</strong> {resultDetailsMap[r._id].score} / {resultDetailsMap[r._id].total} • {resultDetailsMap[r._id].percentage}%</div>
+                                    <div style={{ marginBottom: 12 }}><strong>Completed:</strong> {new Date(resultDetailsMap[r._id].completedAt).toLocaleString()}</div>
+                                    <div>
+                                      <h4>Answers</h4>
+                                      <div style={{ borderTop: '1px solid #e5e7eb', marginTop: 8 }} />
+                                      {Array.isArray(resultDetailsMap[r._id].details) && resultDetailsMap[r._id].details.length > 0 ? (
+                                        <div style={{ marginTop: 10 }}>
+                                          {resultDetailsMap[r._id].details.map((d, i) => (
+                                            <div key={i} style={{ padding: 10, borderBottom: '1px solid #f3f4f6' }}>
+                                              <div style={{ fontWeight: 600 }}>{i + 1}. {d.questionText}</div>
+                                              <div style={{ marginTop: 6 }}><strong>Your answer:</strong> {d.userAnswer}</div>
+                                              <div><strong>Correct answer:</strong> {d.correctAnswer}</div>
+                                              <div style={{ marginTop: 6, color: d.correct ? '#10b981' : '#ef4444' }}>{d.correct ? 'Correct' : 'Incorrect'}</div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <div>No detail available</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div>No details found.</div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Result Details Modal */}
+        {resultDetailOpen && (
+          <div className="modal-overlay">
+            <div className="modal-content" style={{ maxWidth: 760 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3>Result Details</h3>
+                <button className="btn-close" onClick={() => { setResultDetailOpen(false); setResultDetail(null); }}>×</button>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                {detailLoading ? (
+                  <div>Loading…</div>
+                ) : resultDetail ? (
+                  <div>
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Student:</strong> {resultDetail.userId?.name} • {resultDetail.userId?.email}
+                    </div>
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Score:</strong> {resultDetail.score} / {resultDetail.total} • {resultDetail.percentage}%
+                    </div>
+                    <div style={{ marginBottom: 12 }}>
+                      <strong>Completed:</strong> {new Date(resultDetail.completedAt).toLocaleString()}
+                    </div>
+
+                    <div>
+                      <h4>Answers</h4>
+                      <div style={{ borderTop: '1px solid #e5e7eb', marginTop: 8 }} />
+                      {Array.isArray(resultDetail.details) && resultDetail.details.length > 0 ? (
+                        <div style={{ marginTop: 10 }}>
+                          {resultDetail.details.map((d, i) => (
+                            <div key={i} style={{ padding: 10, borderBottom: '1px solid #f3f4f6' }}>
+                              <div style={{ fontWeight: 600 }}>{i + 1}. {d.questionText}</div>
+                              <div style={{ marginTop: 6 }}><strong>Your answer:</strong> {d.userAnswer}</div>
+                              <div><strong>Correct answer:</strong> {d.correctAnswer}</div>
+                              <div style={{ marginTop: 6, color: d.correct ? '#10b981' : '#ef4444' }}>{d.correct ? 'Correct' : 'Incorrect'}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div>No detail available</div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div>No details found.</div>
+                )}
+              </div>
             </div>
           </div>
         )}

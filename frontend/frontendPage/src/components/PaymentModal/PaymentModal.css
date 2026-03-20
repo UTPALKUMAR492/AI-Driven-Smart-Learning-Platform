@@ -1,0 +1,51 @@
+.pm-overlay{
+  position: fixed;
+  inset: 0;
+  background: rgba(2,6,23,0.6);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index: 9999;
+  padding: 20px;
+}
+.pm-modal{
+  background: #ffffff;
+  padding: 18px;
+  border-radius: 12px;
+  width: 720px;
+  max-width: 95%;
+  box-shadow: 0 12px 40px rgba(2,6,23,0.35);
+  display: flex;
+  gap: 18px;
+}
+.pm-form{ flex: 1 }
+.pm-form input, .pm-form textarea, .pm-form select{
+  display:block; width:100%; padding:10px 12px; margin:8px 0; border:1px solid #e6edf3; border-radius:8px; font-size:14px;
+}
+.pm-form label{ font-size:13px; color:#374151; margin-top:8px; display:block }
+.pm-actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:12px }
+
+.pm-modal--wide{ width:820px }
+.pm-header{ display:flex; justify-content:space-between; align-items:center }
+.pm-sub{ font-size:12px; color:#6b7280 }
+.pm-card-ui{ width:300px; flex-shrink:0 }
+.pm-card-face{ width:100%; height:160px; background:linear-gradient(135deg,#0f172a,#0ea5e9); border-radius:12px; color:#fff; padding:16px; box-shadow:0 12px 30px rgba(2,6,23,0.2); position:relative }
+.pm-chip{ width:44px; height:28px; background:rgba(255,255,255,0.2); border-radius:6px; margin-bottom:8px }
+.pm-number{ font-size:18px; letter-spacing:3px; margin-top:16px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace }
+.pm-name{ margin-top:14px; font-size:14px; opacity:0.95 }
+.pm-expiry{ position:absolute; right:16px; bottom:16px; font-size:13px }
+.pm-form textarea{ width:100%; min-height:80px; margin-top:8px }
+.btn-ghost{ border:none; background:transparent; font-size:20px }
+.pm-result img{ display:block; margin-top:8px; max-width:200px }
+
+/* Buttons */
+.btn-primary{ background: linear-gradient(135deg,#4f46e5,#06b6d4); color: white; padding: 10px 14px; border-radius: 8px; border: none; font-weight: 600; cursor: pointer }
+.btn-primary:disabled{ opacity: 0.6; cursor: not-allowed }
+.btn-outline{ background: transparent; border: 1px solid #e6edf3; padding: 10px 12px; border-radius: 8px; cursor: pointer }
+
+/* small responsive tweaks */
+@media (max-width: 900px){
+  .pm-modal{ flex-direction: column; width: 96%; }
+  .pm-card-ui{ width: 100%; display:flex; justify-content:center }
+  .pm-card-face{ height:140px }
+}

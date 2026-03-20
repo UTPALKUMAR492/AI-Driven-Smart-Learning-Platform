@@ -1,20 +1,34 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useContext } from 'react'
+import { AuthContext } from '../../context/AuthContext'
 import { toast } from 'react-toastify'
-import { createCourse, createQuiz, getDashboardStats, getAllUsers, deleteUser, getAnalytics } from '../../api/adminApi'
+import { createCourse, createQuiz, getDashboardStats, getAllUsers, deleteUser, getAnalytics, updateUserRole, getAllCourses as adminGetAllCourses, toggleCoursePublish, deleteCourse as adminDeleteCourse, generateQuestionsAIAdmin, getAllQuizzes, deleteQuiz as adminDeleteQuiz, getQuizResultsAdmin, updateCourse } from '../../api/adminApi'
 import { getAllCourses } from '../../api/courseApi'
 import Loader from '../../components/Loader/Loader'
+import api from '../../api/axiosConfig'
 import './AdminDashboard.css'
+import { useNavigate } from 'react-router-dom'
 
 export default function AdminDashboard() {
+  const { user } = useContext(AuthContext)
   const [activeTab, setActiveTab] = useState('overview')
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState(null)
   const [users, setUsers] = useState([])
   const [courses, setCourses] = useState([])
+  const [quizzes, setQuizzes] = useState([])
+  const [quizResults, setQuizResults] = useState([])
+  const [resultsModalOpen, setResultsModalOpen] = useState(false)
+  const [selectedQuizTitle, setSelectedQuizTitle] = useState('')
+  const [pendingCourses, setPendingCourses] = useState([])
+  const [isEditingCourse, setIsEditingCourse] = useState(false)
+  const [editingCourseId, setEditingCourseId] = useState(null)
   const [analytics, setAnalytics] = useState(null)
+  const [questionBank, setQuestionBank] = useState([])
+  const navigate = useNavigate()
   const [userSearch, setUserSearch] = useState('')
   const [userFilter, setUserFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
+  const [updatingRoleFor, setUpdatingRoleFor] = useState(null)
 
   // Course form state
   const [courseData, setCourseData] = useState({
@@ -37,8 +51,10 @@ export default function AdminDashboard() {
     courseId: '',
     difficulty: 'Beginner',
     duration: 30,
-    questions: []
+    questions: [],
+    isPublished: false
   })
+  
 
   // Current question being added
   const [currentQuestion, setCurrentQuestion] = useState({
@@ -56,21 +72,120 @@ export default function AdminDashboard() {
     isFree: false
   })
 
+  // AI Question Generation Dialog State
+  const [showAIGen, setShowAIGen] = useState(false)
+  const [aiGenTopic, setAIGenTopic] = useState('')
+  const [aiGenCourseId, setAIGenCourseId] = useState('')
+  const [aiGenNum, setAIGenNum] = useState(10)
+  const [aiGenLoading, setAIGenLoading] = useState(false)
+
+  // Handle AI Question Generation
+  const handleAIGenerate = async (e) => {
+    e.preventDefault()
+    if (!aiGenCourseId || !aiGenTopic) return toast.error('Select course and enter topic')
+    setAIGenLoading(true)
+    try {
+      const { questions } = await generateQuestionsAIAdmin({ courseId: aiGenCourseId, topic: aiGenTopic, numQuestions: aiGenNum })
+      toast.success(`Generated ${questions.length} questions!`)
+      setShowAIGen(false)
+      setAIGenTopic('')
+      setAIGenCourseId('')
+      setAIGenNum(10)
+      fetchDashboardData()
+    } catch (err) {
+      toast.error(err.message || 'AI question generation failed')
+    } finally {
+      setAIGenLoading(false)
+    }
+  }
+
   useEffect(() => {
     fetchDashboardData()
   }, [])
 
+  const fetchRecentQuestions = async () => {
+    try {
+      const res = await api.get('/questions/recent?limit=50')
+      setQuestionBank(res.data.questions || [])
+    } catch (e) {
+      console.warn('Failed to load recent questions', e)
+      setQuestionBank([])
+    }
+  }
+
+  const editQuestionLocally = (id) => {
+    const q = questionBank.find(x => x._id === id)
+    if (!q) return toast.error('Question not found')
+    const newText = window.prompt('Edit question text', q.text || '')
+    if (newText === null) return
+    const optsCsv = window.prompt('Enter options separated by | (pipe)', (q.options || []).join(' | '))
+    if (optsCsv === null) return
+    const opts = optsCsv.split('|').map(s => s.trim()).filter(Boolean)
+    const correct = window.prompt('Enter correct option letter (A/B/C/D)', (() => {
+      const idx = (q.options||[]).findIndex(o => o === q.correctAnswer)
+      return idx >= 0 ? String.fromCharCode(65+idx) : 'A'
+    })())
+    if (correct === null) return
+    const correctIdx = ['A','B','C','D'].indexOf(String(correct).toUpperCase())
+    const updated = questionBank.map(x => x._id === id ? { ...x, text: newText, options: opts, correctAnswer: opts[correctIdx] || opts[0] || '' } : x)
+    setQuestionBank(updated)
+    toast.success('Question updated locally')
+  }
+
+  const renderOptionsList = (q) => (
+    <ul style={{ margin: '6px 0 0 0', paddingLeft: 18 }}>
+      {(q.options || []).slice(0,4).map((opt, i) => (
+        <li key={i} style={{ color: q.correctAnswer === opt ? '#0b7' : '#333' }}>
+          <strong style={{ marginRight: 8 }}>{String.fromCharCode(65 + i)}.</strong>{opt}
+        </li>
+      ))}
+    </ul>
+  )
+
+  const normalizePrice = (course) => {
+    if (!course) return { amount: 0, currency: 'USD', discount: 0 };
+    if (typeof course.price === 'number') return { amount: course.price, currency: course.currency || 'USD', discount: 0 };
+    const p = course.price || {};
+    return { amount: p.amount || 0, currency: p.currency || 'USD', discount: p.discount || 0 };
+  }
+
+  const getEnrolledCount = (course) => {
+    if (!course) return 0
+    return course.enrolledStudents?.count ?? course.studentsEnrolled ?? 0
+  }
+
+  const getRatingValue = (course) => {
+    if (!course) return 0
+    if (typeof course.rating === 'number') return course.rating
+    if (course.rating?.average) return course.rating.average
+    return 0
+  }
+
+  const getCourseLessonsCount = (course) => {
+    if (!course) return 0
+    // Prefer explicit totalLessons if present
+    if (typeof course.totalLessons === 'number' && course.totalLessons > 0) return course.totalLessons
+    // If sections exist, sum lessons across sections
+    if (Array.isArray(course.sections) && course.sections.length > 0) {
+      return course.sections.reduce((sum, sec) => sum + (Array.isArray(sec.lessons) ? sec.lessons.length : 0), 0)
+    }
+    // Fallback to legacy lessons array
+    if (Array.isArray(course.lessons)) return course.lessons.length
+    return 0
+  }
+
   const fetchDashboardData = async () => {
     setLoading(true)
     try {
-      const [statsData, usersData, coursesData, analyticsData] = await Promise.all([
+      const [statsData, usersData, coursesData, analyticsData, quizzesData] = await Promise.all([
         getDashboardStats().catch(() => null),
         getAllUsers().catch(() => ({ users: [] })),
-        getAllCourses().catch(() => ({ courses: [] })),
-        getAnalytics().catch(() => null)
+        adminGetAllCourses().catch(() => ({ courses: [] })),
+        getAnalytics().catch(() => null),
+        getAllQuizzes().catch(() => ({ quizzes: [] }))
       ])
       
-      setStats(statsData || {
+      setStats(statsData?.stats || {
         totalUsers: 0,
         totalCourses: 0,
         totalQuizzes: 0,
@@ -79,11 +194,75 @@ export default function AdminDashboard() {
       })
       setUsers(usersData?.users || usersData || [])
       setCourses(coursesData?.courses || coursesData || [])
+      setQuizzes(quizzesData?.quizzes || quizzesData || [])
       setAnalytics(analyticsData)
     } catch (error) {
       console.error('Dashboard error:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Fetch pending courses for Approval Queue
+  const fetchPending = async () => {
+    try {
+      const data = await adminGetAllCourses({ isPublished: 'false', limit: 50 });
+      setPendingCourses(data.courses || []);
+    } catch (err) {
+      console.error('Could not load pending courses', err);
+    }
+  }
+
+  useEffect(() => {
+    // load pending when admin opens approval queue
+    if (activeTab === 'approval') fetchPending();
+  }, [activeTab])
+
+  const handleApprove = async (courseId) => {
+    try {
+      await toggleCoursePublish(courseId)
+      toast.success('Course approved and published')
+      fetchDashboardData()
+      fetchPending()
+    } catch (err) {
+      toast.error('Could not approve course')
+    }
+  }
+
+  const handleReject = async (courseId) => {
+    if (!window.confirm('Rejecting will delete the course. Continue?')) return
+    try {
+      await adminDeleteCourse(courseId)
+      toast.success('Course rejected and deleted')
+      fetchPending()
+      fetchDashboardData()
+    } catch (err) {
+      toast.error('Could not reject course')
+    }
+  }
+
+  const handlePublish = async (courseId, publish = true) => {
+    try {
+      await toggleCoursePublish(courseId, publish)
+      toast.success(publish ? 'Course published' : 'Course unpublished')
+      fetchDashboardData()
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Could not update publish status')
+    }
+  }
+
+  const handleViewCourse = (courseId) => {
+    navigate(`/courses/${courseId}`)
+  }
+
+  const handleDeleteCourse = async (courseId) => {
+    if (!window.confirm('Delete this course?')) return
+    try {
+      await adminDeleteCourse(courseId)
+      toast.success('Course deleted')
+      fetchDashboardData()
+    } catch (err) {
+      toast.error('Could not delete course')
     }
   }
 
@@ -95,12 +274,26 @@ export default function AdminDashboard() {
 
     setLoading(true)
     try {
-      await createCourse({
-        ...courseData,
-        requirements: courseData.requirements.filter(r => r.trim()),
-        whatYouWillLearn: courseData.whatYouWillLearn.filter(w => w.trim())
-      })
-      toast.success('Course created successfully! 🎉')
+      if (isEditingCourse && editingCourseId) {
+        await updateCourse(editingCourseId, {
+          ...courseData,
+          requirements: courseData.requirements.filter(r => r.trim()),
+          whatYouWillLearn: courseData.whatYouWillLearn.filter(w => w.trim())
+          // quizzes assigned above
+        })
+        toast.success('Course updated successfully')
+        setIsEditingCourse(false)
+        setEditingCourseId(null)
+      } else {
+        const payload = {
+          ...courseData,
+          price: typeof courseData.price === 'object' ? (courseData.price.amount || 0) : (courseData.price || 0),
+          requirements: courseData.requirements.filter(r => r.trim()),
+          whatYouWillLearn: courseData.whatYouWillLearn.filter(w => w.trim())
+        }
+        await createCourse(payload)
+        toast.success('Course created successfully! 🎉')
+      }
       setCourseData({
         title: '',
         description: '',
@@ -121,6 +314,25 @@ export default function AdminDashboard() {
     }
   }
 
+  const openEditCourse = (course) => {
+    setIsEditingCourse(true)
+    setEditingCourseId(course._id)
+    setCourseData({
+      title: course.title || '',
+      description: course.description || '',
+      level: course.level || 'Beginner',
+      category: course.category || 'Development',
+      language: course.language || 'English',
+      price: typeof course.price === 'number' ? { amount: course.price, currency: course.currency || 'USD', discount: 0 } : (course.price || { amount: 0, currency: 'USD', discount: 0 }),
+      thumbnail: course.thumbnail || '',
+      requirements: course.requirements || [''],
+      whatYouWillLearn: course.whatYouWillLearn || [''],
+      lessons: course.sections?.[0]?.lessons?.map(l => ({ title: l.title, description: l.content || '', videoUrl: l.content || '', duration: l.duration || 0, isFree: l.isPreview })) || (course.lessons || [])
+    })
+    setActiveTab('create-course')
+    window.scrollTo(0,0)
+  }
+
   const handleQuizSubmit = async (e) => {
     e.preventDefault()
     if (!quizData.title || quizData.questions.length === 0) {
@@ -137,7 +349,8 @@ export default function AdminDashboard() {
         courseId: '',
         difficulty: 'Beginner',
         duration: 30,
-        questions: []
+        questions: [],
+        isPublished: false
       })
       fetchDashboardData()
     } catch (error) {
@@ -145,6 +358,35 @@ export default function AdminDashboard() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // Load question bank when course is selected for quiz
+  useEffect(() => {
+    const loadBank = async () => {
+      if (!quizData.courseId) return setQuestionBank([])
+      try {
+        const res = await api.get(`/questions/course/${quizData.courseId}`)
+        let bank = res.data.questions || []
+        // if no course-specific questions, fetch recent questions as fallback
+        if (!bank || bank.length === 0) {
+          try {
+            const recentRes = await api.get('/questions/recent?limit=50')
+            bank = recentRes.data.questions || []
+          } catch (e) {
+            console.warn('Failed to load recent questions fallback', e)
+          }
+        }
+        setQuestionBank(bank)
+      } catch (err) {
+        console.error('Failed to load question bank', err)
+        setQuestionBank([])
+      }
+    }
+    loadBank()
+  }, [quizData.courseId])
+
+  const importQuestionToQuiz = (q) => {
+    setQuizData(prev => ({ ...prev, questions: [...prev.questions, { text: q.text, options: q.options, correctAnswer: q.correctAnswer }] }))
   }
 
   const handleDeleteUser = async (userId) => {
@@ -156,6 +398,23 @@ export default function AdminDashboard() {
       setUsers(users.filter(u => u._id !== userId))
     } catch (error) {
       toast.error('Failed to delete user')
+    }
+  }
+
+  const handleUpdateUserRole = async (userId, newRole) => {
+    if (!['student','teacher','admin'].includes(newRole)) return toast.error('Invalid role')
+    console.log('Updating role for', userId, '->', newRole)
+    setUpdatingRoleFor(userId)
+    try {
+      const updated = await updateUserRole(userId, newRole)
+      console.log('Update role response', updated)
+      toast.success('User role updated')
+      setUsers(prev => prev.map(u => u._id === userId ? { ...u, role: updated.role } : u))
+    } catch (err) {
+      console.error('Failed updateUserRole:', err)
+      toast.error(err.response?.data?.message || 'Failed to update role')
+    } finally {
+      setUpdatingRoleFor(null)
     }
   }
 
@@ -260,11 +519,26 @@ export default function AdminDashboard() {
   }
 
   const filteredUsers = users.filter(user => {
-    const matchesSearch = user.username?.toLowerCase().includes(userSearch.toLowerCase()) ||
+    const matchesSearch = user.name?.toLowerCase().includes(userSearch.toLowerCase()) ||
                          user.email?.toLowerCase().includes(userSearch.toLowerCase())
     const matchesFilter = userFilter === 'all' || user.role === userFilter
     return matchesSearch && matchesFilter
   })
+
+  const exportUsersCSV = (rows) => {
+    if (!rows || rows.length === 0) return toast.info('No users to export')
+    const headers = ['name','email','role','joinedAt']
+    const csv = [headers.join(',')].concat(rows.map(u => [ '"'+(u.name||'')+'"', u.email || '', u.role || '', '"'+new Date(u.createdAt).toISOString()+'"' ].join(','))).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `users_export.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
 
   if (loading && !stats) {
     return <Loader />
@@ -274,11 +548,54 @@ export default function AdminDashboard() {
     <div className="admin-dashboard">
       {/* Header */}
       <div className="admin-header-section">
-        <div className="container">
-          <h1>Admin Dashboard</h1>
-          <p>Manage your learning platform</p>
+        <div className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <h1>Admin Dashboard</h1>
+            <p>Manage your learning platform</p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button className="ai-gen-btn" onClick={() => setShowAIGen(true)} style={{ background: '#4A6CF7', color: '#fff', borderRadius: 4, padding: '6px 14px', marginLeft: 8 }}>
+              🤖 AI Generate Questions
+            </button>
+            <button
+              className={`refresh-btn ${loading ? 'spin' : ''}`}
+              onClick={() => fetchDashboardData()}
+              disabled={loading}
+              title="Refresh dashboard"
+            >
+              <span className="refresh-icon">🔄</span>
+              <span style={{ marginLeft: 8 }}>{loading ? 'Refreshing...' : 'Refresh'}</span>
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* AI Generate Questions Dialog */}
+      {showAIGen && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3>AI Generate Questions</h3>
+            <form onSubmit={handleAIGenerate}>
+              <label>Course:
+                <select value={aiGenCourseId} onChange={e => setAIGenCourseId(e.target.value)} required>
+                  <option value="">Select Course</option>
+                  {courses.map(c => <option key={c._id} value={c._id}>{c.title}</option>)}
+                </select>
+              </label>
+              <label>Topic or Paper Description:
+                <textarea value={aiGenTopic} onChange={e => setAIGenTopic(e.target.value)} required rows={3} />
+              </label>
+              <label>Number of Questions:
+                <input type="number" min={1} max={30} value={aiGenNum} onChange={e => setAIGenNum(Number(e.target.value))} />
+              </label>
+              <div className="modal-actions">
+                <button type="submit" disabled={aiGenLoading}>{aiGenLoading ? 'Generating...' : 'Generate & Save'}</button>
+                <button type="button" className="btn-secondary" onClick={() => setShowAIGen(false)}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Tabs Navigation */}
       <div className="admin-tabs-container">
@@ -306,18 +623,36 @@ export default function AdminDashboard() {
               Courses ({courses.length})
             </button>
             <button
-              className={`tab-btn ${activeTab === 'create-course' ? 'active' : ''}`}
-              onClick={() => setActiveTab('create-course')}
+              className={`tab-btn ${activeTab === 'questions' ? 'active' : ''}`}
+              onClick={() => { setActiveTab('questions'); fetchRecentQuestions(); }}
             >
-              <span className="icon">➕</span>
-              Create Course
+              <span className="icon">❓</span>
+              Questions
             </button>
+            {user?.role !== 'admin' ? (
+              <>
+                <button
+                  className={`tab-btn ${activeTab === 'create-course' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('create-course')}
+                >
+                  <span className="icon">➕</span>
+                  Create Course
+                </button>
+                <button
+                  className={`tab-btn ${activeTab === 'create-quiz' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('create-quiz')}
+                >
+                  <span className="icon">📝</span>
+                  Create Quiz
+                </button>
+              </>
+            ) : null}
             <button
-              className={`tab-btn ${activeTab === 'create-quiz' ? 'active' : ''}`}
-              onClick={() => setActiveTab('create-quiz')}
+              className={`tab-btn ${activeTab === 'quizzes' ? 'active' : ''}`}
+              onClick={() => setActiveTab('quizzes')}
             >
-              <span className="icon">📝</span>
-              Create Quiz
+              <span className="icon">🏷️</span>
+              Quizzes
             </button>
           </div>
         </div>
@@ -356,7 +691,7 @@ export default function AdminDashboard() {
               <div className="stat-card revenue">
                 <div className="stat-icon">💰</div>
                 <div className="stat-info">
-                  <h3>${stats?.revenue?.toLocaleString() || '0'}</h3>
+                  <h3>₹ {stats?.revenue?.toLocaleString() || '0'}</h3>
                   <p>Revenue</p>
                 </div>
                 <div className="stat-trend up">+18%</div>
@@ -374,18 +709,20 @@ export default function AdminDashboard() {
                   {users.slice(0, 5).map((user) => (
                     <div key={user._id} className="user-item">
                       <img
-                        src={user.avatar || `https://ui-avatars.com/api/?name=${user.username}&background=667eea&color=fff`}
-                        alt={user.username}
+                        src={user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name || 'User')}&background=667eea&color=fff`}
+                        alt={user.name}
                         className="user-avatar"
                       />
-                      <div className="user-info">
-                        <span className="user-name">{user.username}</span>
+                      <div className="user-meta">
+                        <span className="user-name">{user.name}</span>
                         <span className="user-email">{user.email}</span>
                       </div>
                       <span className={`role-badge ${user.role}`}>{user.role}</span>
                     </div>
                   ))}
                 </div>
+
+  
               </div>
 
               <div className="dashboard-card">
@@ -404,11 +741,11 @@ export default function AdminDashboard() {
                       <div className="course-info">
                         <span className="course-title">{course.title}</span>
                         <span className="course-stats">
-                          {course.enrolledStudents?.count || 0} students • {course.lessons?.length || 0} lessons
+                          {getEnrolledCount(course)} students • {getCourseLessonsCount(course)} lessons
                         </span>
                       </div>
                       <span className="course-price">
-                        {course.price?.amount > 0 ? `$${course.price.amount}` : 'Free'}
+                        {normalizePrice(course).amount > 0 ? `₹ ${normalizePrice(course).amount}` : 'Free'}
                       </span>
                     </div>
                   ))}
@@ -416,31 +753,189 @@ export default function AdminDashboard() {
               </div>
             </div>
 
+              <div className="dashboard-card">
+                <div className="card-header">
+                  <h3>Generated / Recent Questions</h3>
+                  <button className="btn-view-all" onClick={() => { setActiveTab('questions'); fetchRecentQuestions(); }}>View All</button>
+                </div>
+                <div className="questions-list">
+                  {questionBank.slice(0,5).map((q) => (
+                    <div key={q._id} className="question-item">
+                      <div style={{ flex: 1 }}>
+                        <strong>{q.text}</strong>
+                        {renderOptionsList(q)}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button className="btn-add" onClick={() => {
+                          // Import into quiz creation area
+                          setActiveTab('create-quiz');
+                          // prefill a single-question quiz draft
+                          setQuizData(prev => ({ ...prev, questions: [...prev.questions, { text: q.text, options: q.options, correctAnswer: q.correctAnswer }] }));
+                          toast.success('Imported question into quiz draft')
+                        }}>Add</button>
+                        <button className="btn-secondary" onClick={() => editQuestionLocally(q._id)}>Edit</button>
+                        {!q.published && (
+                          <button className="btn-primary" onClick={async () => {
+                            try {
+                              const res = await fetch((import.meta.env.VITE_API_URL || 'http://localhost:5000') + `/api/questions/${q._id}/publish`, { method: 'POST', credentials: 'include', headers: { Authorization: (localStorage.getItem('token') ? `Bearer ${localStorage.getItem('token')}` : '') } })
+                              if (!res.ok) throw new Error('Publish failed')
+                              toast.success('Question published')
+                              fetchRecentQuestions()
+                            } catch (err) { toast.error('Could not publish question') }
+                          }}>Publish</button>
+                        )}
+                        <button className="btn-danger" onClick={async () => {
+                          if (!window.confirm('Delete this question?')) return
+                          try {
+                            const res = await fetch((import.meta.env.VITE_API_URL || 'http://localhost:5000') + `/api/questions/${q._id}`, { method: 'DELETE', credentials: 'include', headers: { Authorization: (localStorage.getItem('token') ? `Bearer ${localStorage.getItem('token')}` : '') } })
+                            if (!res.ok) throw new Error('Delete failed')
+                            toast.success('Question deleted')
+                            fetchRecentQuestions()
+                          } catch (err) { toast.error('Could not delete question') }
+                        }}>Delete</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
             {/* Quick Actions */}
             <div className="quick-actions">
-              <h3>Quick Actions</h3>
+              {/* <h3>Quick Actions</h3> */}
               <div className="actions-grid">
-                <button className="action-card" onClick={() => setActiveTab('create-course')}>
-                  <span className="action-icon">📚</span>
-                  <span className="action-title">Create Course</span>
-                  <span className="action-desc">Add a new course to your platform</span>
-                </button>
-                <button className="action-card" onClick={() => setActiveTab('create-quiz')}>
-                  <span className="action-icon">📝</span>
-                  <span className="action-title">Create Quiz</span>
-                  <span className="action-desc">Add interactive assessments</span>
-                </button>
-                <button className="action-card" onClick={() => setActiveTab('users')}>
+                {/* <button className="action-card" onClick={() => setActiveTab('users')}>
                   <span className="action-icon">👤</span>
                   <span className="action-title">Manage Users</span>
                   <span className="action-desc">View and manage user accounts</span>
-                </button>
-                <button className="action-card" onClick={fetchDashboardData}>
-                  <span className="action-icon">🔄</span>
-                  <span className="action-title">Refresh Data</span>
-                  <span className="action-desc">Sync latest information</span>
-                </button>
+                </button> */}
               </div>
+            </div> 
+          </div>
+        )} 
+
+        {/* Results Modal (admin quizzes) */}
+        {resultsModalOpen && (
+          <div className="modal-overlay">
+            <div className="modal-content">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3>{selectedQuizTitle}</h3>
+                <button className="btn-close" onClick={() => setResultsModalOpen(false)}>×</button>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                {quizResults.length === 0 ? (
+                  <div>No results yet.</div>
+                ) : (
+                  <div>
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 8 }}>
+                      <button className="btn-primary" onClick={() => {
+                        // export CSV
+                        const headers = ['rank','name','email','score','total','percentage','completedAt']
+                        const csv = [headers.join(',')].concat(quizResults.map(r => [r.rank, '"'+(r.user?.name||'')+'"', r.user?.email || '', r.score, r.total, r.percentage, '"'+new Date(r.completedAt).toISOString()+'"'].join(','))).join('\n')
+                        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `${selectedQuizTitle.replace(/\s+/g,'_') || 'quiz'}_results.csv`
+                        document.body.appendChild(a)
+                        a.click()
+                        a.remove()
+                        URL.revokeObjectURL(url)
+                      }}>Export CSV</button>
+                    </div>
+                    <div className="results-list">
+                      <div className="table-header">
+                        <div className="th">Rank</div>
+                        <div className="th">Student</div>
+                        <div className="th">Score</div>
+                        <div className="th">%</div>
+                        <div className="th">Completed</div>
+                      </div>
+                      {quizResults.map(r => (
+                        <div key={r._id} className="table-row">
+                          <div className="td">{r.rank}</div>
+                          <div className="td user-cell">
+                            <img src={r.user?.avatar || `https://ui-avatars.com/api/?name=${r.user?.name}&background=667eea&color=fff`} alt={r.user?.name} className="user-avatar-small" />
+                            <span>{r.user?.name}</span>
+                          </div>
+                          <div className="td">{r.score} / {r.total}</div>
+                          <div className="td">{r.percentage}%</div>
+                          <div className="td">{new Date(r.completedAt).toLocaleString()}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Questions management tab */}
+        {activeTab === 'questions' && (
+          <div className="questions-tab">
+            <div className="tab-header">
+              <h2>Questions</h2>
+            </div>
+            <div className="questions-list full">
+              {questionBank.length === 0 ? (
+                <div className="empty">No generated questions found.</div>
+              ) : (
+                questionBank.map(q => (
+                  <div key={q._id} className="question-item">
+                    <div style={{ flex: 1 }}>
+                      <strong>{q.text}</strong>
+                      {renderOptionsList(q)}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn-add" onClick={() => {
+                        setActiveTab('create-quiz');
+                        setQuizData(prev => ({ ...prev, questions: [...prev.questions, { text: q.text, options: q.options, correctAnswer: q.correctAnswer }] }));
+                        toast.success('Imported question into quiz draft')
+                      }}>Add to Quiz</button>
+                      <button className="btn-secondary" onClick={() => editQuestionLocally(q._id)}>Edit</button>
+                      {!q.published && (
+                        <button className="btn-primary" onClick={async () => {
+                          try {
+                            const res = await fetch((import.meta.env.VITE_API_URL || 'http://localhost:5000') + `/api/questions/${q._id}/publish`, { method: 'POST', credentials: 'include', headers: { Authorization: (localStorage.getItem('token') ? `Bearer ${localStorage.getItem('token')}` : '') } })
+                            if (!res.ok) throw new Error('Publish failed')
+                            toast.success('Question published')
+                            fetchRecentQuestions()
+                          } catch (err) { toast.error('Could not publish question') }
+                        }}>Publish</button>
+                      )}
+                      <button className="btn-danger" onClick={async () => {
+                        if (!window.confirm('Delete this question?')) return
+                        try {
+                          const res = await fetch((import.meta.env.VITE_API_URL || 'http://localhost:5000') + `/api/questions/${q._id}`, { method: 'DELETE', credentials: 'include', headers: { Authorization: (localStorage.getItem('token') ? `Bearer ${localStorage.getItem('token')}` : '') } })
+                          if (!res.ok) throw new Error('Delete failed')
+                          toast.success('Question deleted')
+                          fetchRecentQuestions()
+                        } catch (err) { toast.error('Could not delete question') }
+                      }}>Delete</button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* When creating a quiz show question bank import list */}
+        {activeTab === 'create-quiz' && questionBank.length > 0 && (
+          <div className="form-section">
+            <h3>Question Bank (import into quiz)</h3>
+            <div className="questions-list">
+              {questionBank.map((q) => (
+                <div key={q._id} className="question-item">
+                  <div style={{ flex: 1 }}>
+                    <strong>{q.text}</strong>
+                    {renderOptionsList(q)}
+                  </div>
+                  <div>
+                    <button type="button" className="btn-add" onClick={() => importQuestionToQuiz(q)}>Add to Quiz</button>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -467,8 +962,10 @@ export default function AdminDashboard() {
                 >
                   <option value="all">All Roles</option>
                   <option value="student">Students</option>
+                  <option value="teacher">Teachers</option>
                   <option value="admin">Admins</option>
                 </select>
+                <button className="btn-outline" onClick={() => exportUsersCSV(filteredUsers)} style={{ marginLeft: 8 }}>Export CSV</button>
               </div>
             </div>
 
@@ -484,11 +981,11 @@ export default function AdminDashboard() {
                 <div key={user._id} className="table-row">
                   <div className="td user-cell">
                     <img
-                      src={user.avatar || `https://ui-avatars.com/api/?name=${user.username}&background=667eea&color=fff`}
-                      alt={user.username}
+                       src={user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name || 'User')}&background=667eea&color=fff`}
+                      alt={user.name}
                       className="user-avatar-small"
                     />
-                    <span>{user.username}</span>
+                    <span>{user.name}</span>
                   </div>
                   <div className="td">{user.email}</div>
                   <div className="td">
@@ -496,7 +993,17 @@ export default function AdminDashboard() {
                   </div>
                   <div className="td">{new Date(user.createdAt).toLocaleDateString()}</div>
                   <div className="td actions">
-                    <button className="btn-action edit" title="Edit">✏️</button>
+                    <select
+                      className="role-select"
+                      value={user.role}
+                      onChange={(e) => handleUpdateUserRole(user._id, e.target.value)}
+                      title="Change role"
+                      disabled={updatingRoleFor === user._id}
+                    >
+                      <option value="student">Student</option>
+                      <option value="teacher">Teacher</option>
+                      <option value="admin">Admin</option>
+                    </select>
                     <button
                       className="btn-action delete"
                       title="Delete"
@@ -516,9 +1023,7 @@ export default function AdminDashboard() {
           <div className="courses-tab">
             <div className="tab-header">
               <h2>Course Management</h2>
-              <button className="btn-primary" onClick={() => setActiveTab('create-course')}>
-                + Create Course
-              </button>
+                {/* Create course removed for admin role */}
             </div>
 
             <div className="courses-table">
@@ -527,10 +1032,11 @@ export default function AdminDashboard() {
                 <div className="th">Category</div>
                 <div className="th">Students</div>
                 <div className="th">Price</div>
+                <div className="th">Revenue</div>
                 <div className="th">Rating</div>
                 <div className="th">Actions</div>
               </div>
-              {courses.map((course) => (
+                  {courses.map((course) => (
                 <div key={course._id} className="table-row">
                   <div className="td course-cell">
                     <img
@@ -540,32 +1046,37 @@ export default function AdminDashboard() {
                     />
                     <div className="course-details">
                       <span className="course-name">{course.title}</span>
-                      <span className="course-lessons">{course.lessons?.length || 0} lessons</span>
+                      <span className="course-lessons">{getCourseLessonsCount(course)} lessons</span>
                     </div>
                   </div>
                   <div className="td">{course.category || 'General'}</div>
-                  <div className="td">{course.enrolledStudents?.count || 0}</div>
+                  <div className="td">{course.enrolledStudents?.count ?? course.studentsEnrolled ?? course.studentsEnrolled === 0 ? course.studentsEnrolled : 0}</div>
                   <div className="td">
-                    {course.price?.amount > 0 ? (
+                    {normalizePrice(course).amount > 0 ? (
                       <span className="price">
-                        ${course.price.amount}
-                        {course.price.discount > 0 && (
-                          <span className="discount">-{course.price.discount}%</span>
+                        ₹ {normalizePrice(course).amount}
+                        {normalizePrice(course).discount > 0 && (
+                          <span className="discount">-{normalizePrice(course).discount}%</span>
                         )}
                       </span>
                     ) : (
                       <span className="price free">Free</span>
                     )}
                   </div>
+                  <div className="td">{Math.round(normalizePrice(course).amount * getEnrolledCount(course)) > 0 ? `₹ ${Math.round(normalizePrice(course).amount * getEnrolledCount(course))}` : '₹ 0'}</div>
                   <div className="td">
                     <span className="rating">
-                      ⭐ {course.rating?.average?.toFixed(1) || '0.0'}
+                      ⭐ {getRatingValue(course).toFixed(1)}
                     </span>
                   </div>
                   <div className="td actions">
-                    <button className="btn-action view" title="View">👁️</button>
-                    <button className="btn-action edit" title="Edit">✏️</button>
-                    <button className="btn-action delete" title="Delete">🗑️</button>
+                    <button className="btn-action view" title="View" onClick={() => handleViewCourse(course._id)}>👁️</button>
+                    {course.isPublished ? (
+                      <button className="btn-action" title="Unpublish" onClick={() => handlePublish(course._id, false)}>🔒 Unpublish</button>
+                    ) : (
+                      <button className="btn-action" title="Publish" onClick={() => handlePublish(course._id, true)}>✅ Publish</button>
+                    )}
+                    <button className="btn-action delete" title="Delete" onClick={() => handleDeleteCourse(course._id)}>🗑️</button>
                   </div>
                 </div>
               ))}
@@ -573,8 +1084,96 @@ export default function AdminDashboard() {
           </div>
         )}
 
+        {/* Quizzes Tab */}
+        {activeTab === 'quizzes' && (
+          <div className="quizzes-tab">
+            <div className="tab-header">
+              <h2>Quiz Management</h2>
+            </div>
+
+            <div className="courses-table quizzes-table">
+              <div className="table-header">
+                <div className="th">Title</div>
+                <div className="th">Course</div>
+                <div className="th">Questions</div>
+                <div className="th">Difficulty</div>
+                <div className="th">Duration (min)</div>
+                <div className="th">Actions</div>
+              </div>
+              {quizzes.map((quiz) => (
+                <div key={quiz._id} className="table-row">
+                  <div className="td">{quiz.title}</div>
+                  <div className="td">{quiz.courseId?.title || '—'}</div>
+                  <div className="td">{quiz.questions?.length || 0}</div>
+                  <div className="td">{quiz.difficulty}</div>
+                  <div className="td">{quiz.duration}</div>
+                  <div className="td actions">
+                    <button className="btn-action view" title="View" onClick={() => navigate(`/admin/quiz/${quiz._id}`)}>👁️</button>
+                    <button className="btn-action" title="Results" onClick={async () => {
+                      try {
+                        const res = await getQuizResultsAdmin(quiz._id)
+                        setQuizResults(res || [])
+                        setSelectedQuizTitle(quiz.title || 'Quiz Results')
+                        setResultsModalOpen(true)
+                      } catch (err) {
+                        toast.error('Could not load results')
+                      }
+                    }}>🏆</button>
+                    <button className="btn-action delete" title="Delete" onClick={async () => {
+                      if (!window.confirm('Delete this quiz?')) return;
+                      try {
+                        await adminDeleteQuiz(quiz._id);
+                        toast.success('Quiz deleted');
+                        setQuizzes(prev => prev.filter(q => q._id !== quiz._id));
+                      } catch (err) {
+                        console.error('Failed to delete quiz', err);
+                        toast.error(err?.response?.data?.message || 'Could not delete quiz');
+                      }
+                    }}>🗑️</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Approval Queue */}
+        {activeTab === 'approval' && (
+          <div className="approval-tab">
+            <div className="tab-header">
+              <h2>Approval Queue</h2>
+              <p>Courses awaiting admin approval</p>
+            </div>
+            <div className="pending-list">
+              {pendingCourses.length === 0 ? (
+                <div className="empty">No pending courses</div>
+              ) : (
+                pendingCourses.map(course => (
+                  <div key={course._id} className="pending-item">
+                    <img src={course.thumbnail} alt={course.title} className="pending-thumb" />
+                    <div className="pending-meta">
+                      <h3>{course.title}</h3>
+                      <p>{course.description?.slice(0, 160)}{course.description?.length > 160 ? '...' : ''}</p>
+                      <div className="meta-row">
+                        <span>By: {course.instructor?.name || course.instructorName}</span>
+                        <span>Category: {course.category}</span>
+                        <span>Price: {course.price?.amount ? `₹ ${course.price.amount}` : 'Free'}</span>
+                      </div>
+                    </div>
+                    <div className="pending-actions">
+                      <button className="btn-approve" onClick={() => handleApprove(course._id)}>Approve</button>
+                      <button className="btn-reject" onClick={() => handleReject(course._id)}>Reject</button>
+                      <button className="btn-view" onClick={() => setActiveTab('courses')}>Manage</button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Create Course Tab */}
-        {activeTab === 'create-course' && (
+        {user?.role !== 'admin' && activeTab === 'create-course' && (
           <div className="create-course-tab">
             <h2>Create New Course</h2>
             <form onSubmit={handleCourseSubmit} className="course-form">
@@ -661,7 +1260,7 @@ export default function AdminDashboard() {
                 <h3>Pricing</h3>
                 <div className="form-grid">
                   <div className="form-group">
-                    <label>Price ($)</label>
+                    <label>Price (₹)</label>
                     <input
                       type="number"
                       className="form-input"
@@ -815,7 +1414,7 @@ export default function AdminDashboard() {
         )}
 
         {/* Create Quiz Tab */}
-        {activeTab === 'create-quiz' && (
+        {user?.role !== 'admin' && activeTab === 'create-quiz' && (
           <div className="create-quiz-tab">
             <h2>Create New Quiz</h2>
             <form onSubmit={handleQuizSubmit} className="quiz-form">
@@ -878,6 +1477,12 @@ export default function AdminDashboard() {
                         <option key={course._id} value={course._id}>{course.title}</option>
                       ))}
                     </select>
+                  </div>
+                  <div className="form-group" style={{ alignSelf: 'center' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input type="checkbox" checked={quizData.isPublished} onChange={(e) => setQuizData(prev => ({ ...prev, isPublished: e.target.checked }))} />
+                      <span>Publish now</span>
+                    </label>
                   </div>
                 </div>
               </div>

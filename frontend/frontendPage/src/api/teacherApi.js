@@ -1,146 +1,164 @@
 import api from './axiosConfig'
 
+// AI: Generate questions for a course using OpenAI
+export const generateQuestionsAI = async ({ courseId, topic, numQuestions }) => {
+  try {
+    const res = await api.post('/ai/question/generate-questions', { courseId, topic, numQuestions });
+    return extract(res);
+  } catch (err) { extractError(err); }
+};
+
 const extract = (res) => res?.data
 const extractError = (err) => {
   if (err?.response?.data) throw err.response.data
   throw err
 }
 
-// Get teacher dashboard stats
+/* ===========================
+      TEACHER DASHBOARD API
+=========================== */
+
+// Teacher stats
 export const getTeacherStats = async () => {
   try {
     const res = await api.get('/teacher/stats')
     return extract(res)
-  } catch (err) {
-    extractError(err)
-  }
+  } catch (err) { extractError(err) }
 }
 
-// Get teacher's courses
+// Teacher courses
 export const getTeacherCourses = async () => {
   try {
     const res = await api.get('/teacher/courses')
     return extract(res)
-  } catch (err) {
-    extractError(err)
-  }
+  } catch (err) { extractError(err) }
 }
 
-// Get teacher's quizzes
+// Teacher quizzes
 export const getTeacherQuizzes = async () => {
   try {
     const res = await api.get('/teacher/quizzes')
     return extract(res)
-  } catch (err) {
-    extractError(err)
-  }
+  } catch (err) { extractError(err) }
 }
 
-// Get students enrolled in teacher's courses
+// Get quiz results (teacher view)
+export const getQuizResults = async (quizId) => {
+  try {
+    const res = await api.get(`/teacher/quizzes/${quizId}/results`)
+    return extract(res)
+  } catch (err) { extractError(err) }
+}
+
+// Get a specific result details (uses student route)
+export const getResultDetails = async (resultId) => {
+  try {
+    const res = await api.get(`/student/results/${resultId}`)
+    return extract(res)
+  } catch (err) { extractError(err) }
+}
+
+// Teacher students
 export const getTeacherStudents = async () => {
   try {
     const res = await api.get('/teacher/students')
     return extract(res)
-  } catch (err) {
-    extractError(err)
-  }
+  } catch (err) { extractError(err) }
 }
 
-// Publish/Unpublish course
+
+/* ===========================
+         COURSE API
+=========================== */
+
+// CREATE COURSE (correct backend route)
+export const createCourse = async (courseData) => {
+  try {
+    const res = await api.post('/teacher/courses', courseData)
+    return extract(res)
+  } catch (err) { extractError(err) }
+}
+
+// UPDATE COURSE
+export const updateCourse = async (courseId, courseData) => {
+  try {
+    const res = await api.put(`/teacher/courses/${courseId}`, courseData)
+    return extract(res)
+  } catch (err) { extractError(err) }
+}
+
+// DELETE COURSE
+export const deleteCourse = async (courseId) => {
+  try {
+    const res = await api.delete(`/teacher/courses/${courseId}`)
+    return extract(res)
+  } catch (err) { extractError(err) }
+}
+
+// PUBLISH / UNPUBLISH COURSE
 export const toggleCoursePublish = async (courseId) => {
   try {
     const res = await api.put(`/teacher/courses/${courseId}/publish`)
     return extract(res)
-  } catch (err) {
-    extractError(err)
-  }
+  } catch (err) { extractError(err) }
 }
 
-// Publish/Unpublish quiz
-export const toggleQuizPublish = async (quizId) => {
-  try {
-    const res = await api.put(`/teacher/quizzes/${quizId}/publish`)
-    return extract(res)
-  } catch (err) {
-    extractError(err)
-  }
-}
 
-// Get course analytics
-export const getCourseAnalytics = async (courseId) => {
-  try {
-    const res = await api.get(`/teacher/courses/${courseId}/analytics`)
-    return extract(res)
-  } catch (err) {
-    extractError(err)
-  }
-}
+/* ===========================
+           QUIZ API
+=========================== */
 
-// Create course
-export const createCourse = async (courseData) => {
-  try {
-    const res = await api.post('/courses', courseData)
-    return extract(res)
-  } catch (err) {
-    extractError(err)
-  }
-}
-
-// Update course
-export const updateCourse = async (courseId, courseData) => {
-  try {
-    const res = await api.put(`/courses/${courseId}`, courseData)
-    return extract(res)
-  } catch (err) {
-    extractError(err)
-  }
-}
-
-// Delete course
-export const deleteCourse = async (courseId) => {
-  try {
-    const res = await api.delete(`/courses/${courseId}`)
-    return extract(res)
-  } catch (err) {
-    extractError(err)
-  }
-}
-
-// Create quiz
+// CREATE QUIZ (your backend route is /quiz)
 export const createQuiz = async (quizData) => {
   try {
     const res = await api.post('/quiz', quizData)
     return extract(res)
-  } catch (err) {
-    extractError(err)
-  }
+  } catch (err) { extractError(err) }
 }
 
-// Update quiz
+// UPDATE QUIZ
 export const updateQuiz = async (quizId, quizData) => {
   try {
     const res = await api.put(`/quiz/${quizId}`, quizData)
     return extract(res)
-  } catch (err) {
-    extractError(err)
-  }
+  } catch (err) { extractError(err) }
 }
 
-// Delete quiz
+// DELETE QUIZ
 export const deleteQuiz = async (quizId) => {
   try {
     const res = await api.delete(`/quiz/${quizId}`)
     return extract(res)
-  } catch (err) {
-    extractError(err)
-  }
+  } catch (err) { extractError(err) }
 }
+
+// PUBLISH / UNPUBLISH QUIZ
+export const toggleQuizPublish = async (quizId) => {
+  try {
+    const res = await api.put(`/teacher/quizzes/${quizId}/publish`)
+    return extract(res)
+  } catch (err) { extractError(err) }
+}
+
+
+/* ===========================
+       COURSE ANALYTICS
+=========================== */
+
+export const getCourseAnalytics = async (courseId) => {
+  try {
+    const res = await api.get(`/teacher/courses/${courseId}/analytics`)
+    return extract(res)
+  } catch (err) { extractError(err) }
+}
+
 
 export default {
   getTeacherStats,
   getTeacherCourses,
   getTeacherQuizzes,
   getTeacherStudents,
+  getQuizResults,
   toggleCoursePublish,
   toggleQuizPublish,
   getCourseAnalytics,

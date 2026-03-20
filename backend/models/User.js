@@ -53,6 +53,13 @@ const UserSchema = new mongoose.Schema({
   enrolledCourses: [enrollmentSchema],
   wishlist: [{ type: mongoose.Schema.Types.ObjectId, ref: "Course" }],
   completedCourses: [{ type: mongoose.Schema.Types.ObjectId, ref: "Course" }],
+  // Cart for server-side cart persistence
+  cart: [
+    {
+      course: { type: mongoose.Schema.Types.ObjectId, ref: "Course" },
+      addedAt: { type: Date, default: Date.now }
+    }
+  ],
   
   // Stats
   totalQuizzesTaken: { type: Number, default: 0 },
@@ -60,6 +67,16 @@ const UserSchema = new mongoose.Schema({
   totalLearningHours: { type: Number, default: 0 },
   streak: { type: Number, default: 0 },
   lastActiveDate: Date,
+  // Gamification badges and rewards
+  badges: [
+    {
+      id: String,
+      name: String,
+      description: String,
+      awardedAt: Date,
+      courseId: { type: mongoose.Schema.Types.ObjectId, ref: 'Course' }
+    }
+  ],
   
   // Teacher specific
   teachingCourses: [{ type: mongoose.Schema.Types.ObjectId, ref: "Course" }],
@@ -73,6 +90,30 @@ const UserSchema = new mongoose.Schema({
   isVerified: { type: Boolean, default: false },
   isActive: { type: Boolean, default: true }
 }, { timestamps: true });
+
+// Refresh tokens for session management and revocation
+UserSchema.add({
+  refreshTokens: [
+    {
+      token: String,
+      createdAt: { type: Date, default: Date.now },
+      userAgent: String
+    }
+  ]
+});
+
+// Notifications
+UserSchema.add({
+  notifications: [
+    {
+      type: { type: String },
+      message: String,
+      data: Object,
+      read: { type: Boolean, default: false },
+      createdAt: { type: Date, default: Date.now }
+    }
+  ]
+});
 
 // Hash password before saving
 UserSchema.pre("save", async function(next) {

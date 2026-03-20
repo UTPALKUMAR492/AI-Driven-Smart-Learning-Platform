@@ -58,6 +58,31 @@ export default function CourseCard({ course, isInWishlist = false, onWishlistCha
     return `${mins}m`
   }
 
+  const normalizePrice = (course) => {
+    if (!course) return { amount: 0, currency: 'USD', discount: 0 };
+    if (typeof course.price === 'number') return { amount: course.price, currency: course.currency || 'USD', discount: 0 };
+    // support legacy numeric fields and nested price objects
+    const p = course.price || (course.price && typeof course.price === 'object' ? course.price : {}) || {};
+    // if backend uses `originalPrice` and `price` numeric fields
+    if (!p.amount && typeof course.price === 'number') p.amount = course.price
+    if (!p.amount && typeof course.originalPrice === 'number') p.amount = course.price || 0
+    return { amount: p.amount || 0, currency: p.currency || 'USD', discount: p.discount || 0 };
+  }
+
+  const getEnrolledCount = (course) => {
+    if (!course) return 0
+    return course.enrolledStudents?.count ?? course.studentsEnrolled ?? course.studentsEnrolled === 0 ? course.studentsEnrolled : 0
+  }
+
+  const getRatingValue = (course) => {
+    // support both course.rating as number and nested shape
+    if (!course) return 0
+    if (typeof course.rating === 'number') return course.rating
+    if (course.rating?.average) return course.rating.average
+    if (course.rating?.value) return course.rating.value
+    return 0
+  }
+
   const renderStars = (rating) => {
     const stars = []
     const fullStars = Math.floor(rating)
@@ -75,9 +100,8 @@ export default function CourseCard({ course, isInWishlist = false, onWishlistCha
     return stars
   }
 
-  const discountedPrice = course.price?.discount
-    ? course.price.amount * (1 - course.price.discount / 100)
-    : course.price?.amount
+  const _price = normalizePrice(course)
+  const discountedPrice = _price.discount ? _price.amount * (1 - _price.discount / 100) : _price.amount
 
   if (viewMode === 'list') {
     return (
@@ -95,8 +119,8 @@ export default function CourseCard({ course, isInWishlist = false, onWishlistCha
               <span>📚</span>
             </div>
           )}
-          {course.price?.discount > 0 && (
-            <span className="discount-badge">{course.price.discount}% OFF</span>
+          {_price.discount > 0 && (
+            <span className="discount-badge">{_price.discount}% OFF</span>
           )}
         </div>
 
@@ -147,15 +171,11 @@ export default function CourseCard({ course, isInWishlist = false, onWishlistCha
 
         <div className="card-list-actions">
           <div className="price-section">
-            {course.price?.amount > 0 ? (
+            {_price.amount > 0 ? (
               <>
-                <span className="current-price">
-                  {course.price.currency === 'USD' ? '$' : '₹'}{discountedPrice?.toFixed(2)}
-                </span>
-                {course.price.discount > 0 && (
-                  <span className="original-price">
-                    {course.price.currency === 'USD' ? '$' : '₹'}{course.price.amount?.toFixed(2)}
-                  </span>
+                <span className="current-price">₹{discountedPrice?.toFixed(2)}</span>
+                {_price.discount > 0 && (
+                  <span className="original-price">₹{_price.amount?.toFixed(2)}</span>
                 )}
               </>
             ) : (
@@ -201,8 +221,8 @@ export default function CourseCard({ course, isInWishlist = false, onWishlistCha
             {wishlisted ? '❤️' : '🤍'}
           </button>
 
-          {course.price?.discount > 0 && (
-            <span className="discount-badge">{course.price.discount}% OFF</span>
+          {_price.discount > 0 && (
+            <span className="discount-badge">{_price.discount}% OFF</span>
           )}
 
           <div 
@@ -222,11 +242,11 @@ export default function CourseCard({ course, isInWishlist = false, onWishlistCha
             {course.instructor?.username || 'Expert Instructor'}
           </p>
 
-          {course.rating?.average > 0 ? (
+            {getRatingValue(course) > 0 ? (
             <div className="course-rating">
-              <span className="rating-value">{course.rating.average.toFixed(1)}</span>
-              <div className="stars">{renderStars(course.rating.average)}</div>
-              <span className="rating-count">({course.rating.count})</span>
+              <span className="rating-value">{getRatingValue(course).toFixed(1)}</span>
+              <div className="stars">{renderStars(getRatingValue(course))}</div>
+              <span className="rating-count">({course.totalRatings || course.rating?.count || 0})</span>
             </div>
           ) : (
             <div className="course-rating">
@@ -234,8 +254,8 @@ export default function CourseCard({ course, isInWishlist = false, onWishlistCha
             </div>
           )}
 
-          <div className="course-meta">
-            <span>{course.lessons?.length || 0} lessons</span>
+            <div className="course-meta">
+            <span>{course.lessons?.length || course.totalLessons || 0} lessons</span>
             {course.totalDuration && (
               <>
                 <span className="dot">•</span>
@@ -247,15 +267,11 @@ export default function CourseCard({ course, isInWishlist = false, onWishlistCha
 
         <div className="course-card-footer">
           <div className="price-section">
-            {course.price?.amount > 0 ? (
+            {_price.amount > 0 ? (
               <>
-                <span className="current-price">
-                  {course.price.currency === 'USD' ? '$' : '₹'}{discountedPrice?.toFixed(2)}
-                </span>
-                {course.price.discount > 0 && (
-                  <span className="original-price">
-                    {course.price.currency === 'USD' ? '$' : '₹'}{course.price.amount?.toFixed(2)}
-                  </span>
+                <span className="current-price">₹{discountedPrice?.toFixed(2)}</span>
+                {_price.discount > 0 && (
+                  <span className="original-price">₹{_price.amount?.toFixed(2)}</span>
                 )}
               </>
             ) : (
@@ -264,7 +280,7 @@ export default function CourseCard({ course, isInWishlist = false, onWishlistCha
           </div>
 
           <div className="enrolled-count">
-            <span>👥 {course.enrolledStudents?.count || 0}</span>
+            <span>👥 {getEnrolledCount(course)}</span>
           </div>
         </div>
       </Link>

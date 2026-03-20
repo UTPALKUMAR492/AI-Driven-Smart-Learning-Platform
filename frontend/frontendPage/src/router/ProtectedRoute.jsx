@@ -4,7 +4,20 @@ import { useAuth } from '../context/AuthContext'
 import Loader from '../components/Loader/Loader'
 
 export default function ProtectedRoute({children, requiredRole}){
-  const {user, loading} = useAuth()
+  const auth = useAuth()
+
+  // Defensive: ensure auth shape
+  if (!auth || typeof auth !== 'object') {
+    console.warn('ProtectedRoute: unexpected auth object, redirecting to login', auth)
+    return <Navigate to="/login" replace/>
+  }
+
+  const user = auth.user ?? null
+  const loading = auth.loading ?? false
+  if(!user && !loading && typeof user === 'undefined') {
+    console.warn('ProtectedRoute: useAuth returned undefined, falling back to redirect to login')
+    return <Navigate to="/login" replace/>
+  }
   
   // Wait for auth to be checked before making any decisions
   if(loading) {

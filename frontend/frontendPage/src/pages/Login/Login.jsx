@@ -16,7 +16,9 @@ export default function Login() {
   const [showPass, setShowPass] = useState(false);
 
   const params = new URLSearchParams(location.search);
-  const selectedRole = params.get("role");
+  const _roleParam = params.get("role");
+  const allowedRoles = ["student", "teacher"];
+  const selectedRole = allowedRoles.includes(_roleParam) ? _roleParam : null;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -28,21 +30,34 @@ export default function Login() {
       if (selectedRole) body.role = selectedRole;
       const res = await api.post("/auth/login", body);
 
+      // Persist token then fetch authoritative current user
       localStorage.setItem("token", res.data.token);
-      setUser(res.data.user);
-      
-      // Redirect based on role
-      const role = res.data.user.role;
-      console.log("Login successful - User role:", role);
-      toast.success(`Welcome back as ${role} 🎉`);
-      
-      // Use replace to prevent back navigation to login
-      if (role === "admin") {
-        navigate("/admin-dashboard", { replace: true });
-      } else if (role === "teacher") {
-        navigate("/teacher-dashboard", { replace: true });
-      } else {
-        navigate("/student-dashboard", { replace: true });
+      api.defaults.headers.common['Authorization'] = `Bearer ${res.data.token}`
+      try {
+        const me = await api.get('/auth/me');
+        const userFromMe = me.data;
+        setUser(userFromMe);
+        const role = userFromMe.role;
+        console.log("Login successful - User role (from /auth/me):", role);
+        toast.success(`Welcome back as ${role} 🎉`);
+
+        // Use replace to prevent back navigation to login
+        if (role === "admin") {
+          navigate("/admin-dashboard", { replace: true });
+        } else if (role === "teacher") {
+          navigate("/teacher-dashboard", { replace: true });
+        } else {
+          navigate("/student-dashboard", { replace: true });
+        }
+      } catch (e) {
+        // Fallback to response user if /auth/me fails
+        const fallbackRole = res.data.user?.role;
+        setUser(res.data.user);
+        const role = fallbackRole;
+        console.log('Login: /auth/me failed, falling back to login response role:', role);
+        if (role === "admin") navigate("/admin-dashboard", { replace: true });
+        else if (role === "teacher") navigate("/teacher-dashboard", { replace: true });
+        else navigate("/student-dashboard", { replace: true });
       }
     } catch (err) {
       toast.error(err.response?.data?.message || "Invalid credentials");
@@ -98,17 +113,12 @@ export default function Login() {
             {loading ? "Signing in..." : "Sign in"}
           </button>
 
-          <p className="login-bottom">
-            New here? <a href="/register">Create an account</a>
-          </p>
+          {_roleParam === 'admin' ? null : (
+            <p className="login-bottom">
+              New here? <a href={selectedRole ? `/register?role=${selectedRole}` : '/register'}>Create an account</a>
+            </p>
+          )}
         </form>
-      </div>
-
-      <div className="login-side-art">
-        <img
-          src="https://cdni.iconscout.com/illustration/premium/thumb/digital-student-learning-4894158-4091433.png"
-          alt="Learning"
-        />
       </div>
     </div>
   );

@@ -96,7 +96,7 @@
 
 .search-input-wrapper input {
   flex: 1;
-  padding: 12px 15px;
+  padding: 12px 2px;
   border: none;
   font-size: 0.95rem;
   outline: none;

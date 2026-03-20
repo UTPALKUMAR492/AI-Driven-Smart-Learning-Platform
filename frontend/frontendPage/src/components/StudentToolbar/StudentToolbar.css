@@ -1,0 +1,14 @@
+.st-toolbar{ display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 0; margin-top:12px }
+.st-left{ display:flex; gap:8px; align-items:center }
+.st-right{ display:flex; gap:8px }
+.st-btn{ padding:10px 14px; border-radius:8px; border:1px solid #e6edf3; background:#fff; cursor:pointer; font-weight:600 }
+.st-btn:hover{ transform:translateY(-2px); box-shadow:0 8px 24px rgba(2,6,23,0.06) }
+.st-primary{ background:linear-gradient(90deg,#4f46e5,#06b6d4); color:#fff; border:none }
+.st-icon{ background:transparent; border:1px solid #eef2f7; padding:8px 10px; border-radius:8px; cursor:pointer }
+
+.st-icon.active{ background: linear-gradient(90deg,#fff0f6,#fff); border-color: #ff7ab6; color: #ef445a }
+
+@media (max-width: 768px){
+  .st-toolbar{ flex-direction:column; align-items:flex-start }
+  .st-left{ width:100%; display:flex; gap:8px }
+}

@@ -46,11 +46,10 @@ export const getQuiz = async (req, res) => {
 export const createQuiz = async (req, res) => {
   try {
     const { title, description, courseId, difficulty, duration, passingScore, questions, isPublished } = req.body;
-    
+    console.log('CreateQuiz payload:', req.body); // Log incoming data
     if (!title || !questions || questions.length === 0) {
       return res.status(400).json({ message: "Title and at least one question required" });
     }
-
     // If courseId provided, verify it exists and user owns it (for teachers)
     if (courseId) {
       const course = await Course.findById(courseId);
@@ -62,7 +61,6 @@ export const createQuiz = async (req, res) => {
         return res.status(403).json({ message: "Can only add quizzes to your own courses" });
       }
     }
-
     const quiz = await Quiz.create({
       title,
       description,
@@ -74,12 +72,10 @@ export const createQuiz = async (req, res) => {
       questions,
       isPublished: isPublished || false
     });
-
     await quiz.populate('createdBy', 'name avatar');
-
     res.status(201).json(quiz);
   } catch (error) {
-    console.error("Create quiz error:", error);
+    console.error("Create quiz error:", error, req.body);
     res.status(500).json({ message: "Error creating quiz", error: error.message });
   }
 };

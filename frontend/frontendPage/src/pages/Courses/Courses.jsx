@@ -101,6 +101,20 @@ export default function Courses() {
     return hours > 0 ? `${hours}h ${mins % 60}m` : `${mins}m`
   }
 
+  const normalizePrice = (course) => {
+    if (!course) return { amount: 0, currency: 'USD', discount: 0 };
+    if (typeof course.price === 'number') return { amount: course.price, currency: course.currency || 'USD', discount: 0 };
+    const p = course.price || {};
+    return { amount: p.amount || course.price || 0, currency: p.currency || 'USD', discount: p.discount || 0 };
+  }
+
+  const getRatingValue = (course) => {
+    if (!course) return 0
+    if (typeof course.rating === 'number') return course.rating
+    if (course.rating?.average) return course.rating.average
+    return 0
+  }
+
   const activeFiltersCount = [
     category !== 'All' && category,
     level !== 'All Levels' && level,
@@ -294,8 +308,8 @@ export default function Courses() {
                         <h3 className="card-title">{course.title}</h3>
                         <p className="card-instructor">{course.instructorName || 'Expert Instructor'}</p>
                         <div className="card-rating">
-                          <span className="rating-value">{(course.rating || 4.5).toFixed(1)}</span>
-                          <span className="rating-stars">{renderStars(course.rating || 4.5)}</span>
+                          <span className="rating-value">{getRatingValue(course).toFixed(1)}</span>
+                          <span className="rating-stars">{renderStars(getRatingValue(course))}</span>
                           <span className="rating-count">({course.totalRatings || 0})</span>
                         </div>
                         <div className="card-meta">
@@ -306,16 +320,18 @@ export default function Courses() {
                           <span>{course.level || 'Beginner'}</span>
                         </div>
                         <div className="card-footer">
-                          {course.isFree || course.price === 0 ? (
-                            <span className="price-free">Free</span>
-                          ) : (
-                            <div className="price-group">
-                              <span className="price-current">${course.price}</span>
-                              {course.originalPrice > course.price && (
-                                <span className="price-original">${course.originalPrice}</span>
-                              )}
-                            </div>
-                          )}
+                          {(() => {
+                            const p = normalizePrice(course)
+                            if (p.amount > 0) return (
+                              <div className="price-group">
+                                <span className="price-current">₹ {p.amount}</span>
+                                {course.originalPrice > p.amount && (
+                                  <span className="price-original">₹ {course.originalPrice}</span>
+                                )}
+                              </div>
+                            )
+                            return <span className="price-free">Free</span>
+                          })()}
                         </div>
                       </div>
                     </Link>

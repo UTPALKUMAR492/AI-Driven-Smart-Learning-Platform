@@ -51,9 +51,18 @@ export const enrollCourse = async (courseId) => {
     return response.data;
   } catch (error) {
     console.error('Error enrolling in course:', error);
-    throw error;
+    // Normalize the error for the UI: include status and server message if available
+    const serverMessage = error?.response?.data?.message;
+    const status = error?.response?.status;
+    const normalized = new Error(serverMessage || error.message || 'Enrollment failed');
+    if (status) normalized.status = status;
+    if (error?.response?.data) normalized.info = error.response.data;
+    throw normalized;
   }
 };
+
+// Enroll in course
+export const enrollInCourse = enrollCourse;
 
 // Get enrolled courses
 export const getEnrolledCourses = async () => {
@@ -99,6 +108,18 @@ export const toggleWishlist = async (courseId) => {
   }
 };
 
+// Remove from wishlist
+export const removeFromWishlist = async (courseId) => {
+  try {
+    // Replace with actual API endpoint if available
+    const response = await api.delete(`/courses/${courseId}/wishlist`);
+    return response.data;
+  } catch (error) {
+    console.error('Error removing from wishlist:', error);
+    throw error;
+  }
+};
+
 // Get wishlist
 export const getWishlist = async () => {
   try {
@@ -109,6 +130,93 @@ export const getWishlist = async () => {
     throw error;
   }
 };
+
+// Rate a course
+export const rateCourse = async (courseId, rating) => {
+  try {
+    // Accept either a number or an object { rating, comment }
+    const payload = typeof rating === 'number' ? { rating } : rating || {};
+    const response = await api.post(`/courses/${courseId}/rate`, payload);
+    return response.data;
+  } catch (error) {
+    console.error('Error rating course:', error);
+    throw error;
+  }
+};
+
+// Simple client-side cart (localStorage) helpers
+export const addToCart = async (course) => {
+  try {
+    const key = 'smartedu_cart_v1'
+    const raw = localStorage.getItem(key)
+    const cart = raw ? JSON.parse(raw) : []
+    // prevent duplicates by course id
+    if (!cart.find(c => c._id === course._id)) cart.push(course)
+    localStorage.setItem(key, JSON.stringify(cart))
+    return cart
+  } catch (err) {
+    console.error('Error adding to cart:', err)
+    throw err
+  }
+}
+
+// Server-side cart helpers (requires authenticated user)
+export const addToCartServer = async (courseId) => {
+  try {
+    const response = await api.post('/student/cart', { courseId });
+    return response.data;
+  } catch (err) {
+    console.error('Error adding to server cart:', err);
+    throw err;
+  }
+}
+
+export const getCartServer = async () => {
+  try {
+    const response = await api.get('/student/cart');
+    return response.data;
+  } catch (err) {
+    console.error('Error fetching server cart:', err);
+    throw err;
+  }
+}
+
+export const removeFromCartServer = async (courseId) => {
+  try {
+    const response = await api.delete(`/student/cart/${courseId}`);
+    return response.data;
+  } catch (err) {
+    console.error('Error removing from server cart:', err);
+    throw err;
+  }
+}
+
+export const getCart = () => {
+  try {
+    const raw = localStorage.getItem('smartedu_cart_v1')
+    return raw ? JSON.parse(raw) : []
+  } catch (err) {
+    console.error('Error reading cart:', err)
+    return []
+  }
+}
+
+export const removeFromCart = (courseId) => {
+  try {
+    const key = 'smartedu_cart_v1'
+    const raw = localStorage.getItem(key)
+    const cart = raw ? JSON.parse(raw) : []
+    const next = cart.filter(c => c._id !== courseId)
+    localStorage.setItem(key, JSON.stringify(next))
+    return next
+  } catch (err) {
+    console.error('Error removing from cart:', err)
+    return []
+  }
+}
+
+// Named export for dynamic import compatibility
+export const addToWishlist = toggleWishlist;
 
 export default {
   getAllCourses,

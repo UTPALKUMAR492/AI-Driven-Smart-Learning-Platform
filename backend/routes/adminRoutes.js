@@ -9,6 +9,7 @@ import {
   getAllCourses,
   toggleCoursePublish,
   toggleFeatured,
+  getQuizResults,
   getAllQuizzes,
   deleteQuiz
 } from "../controllers/adminController.js";
@@ -36,6 +37,7 @@ router.put("/courses/:id/featured", toggleFeatured);
 
 // Quizzes
 router.get("/quizzes", getAllQuizzes);
+router.get('/quizzes/:id/results', getQuizResults);
 router.post("/quiz", createQuiz);
 router.delete("/quizzes/:id", deleteQuiz);
 

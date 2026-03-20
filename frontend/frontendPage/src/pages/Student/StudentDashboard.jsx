@@ -60,6 +60,13 @@ export default function StudentDashboard() {
     return `${mins} min`
   }
 
+  const normalizePrice = (course) => {
+    if (!course) return { amount: 0, currency: 'USD', discount: 0 };
+    if (typeof course.price === 'number') return { amount: course.price, currency: course.currency || 'USD', discount: 0 };
+    const p = course.price || {};
+    return { amount: p.amount || 0, currency: p.currency || 'USD', discount: p.discount || 0 };
+  }
+
   const renderStars = (rating) => {
     const stars = []
     for (let i = 1; i <= 5; i++) {
@@ -331,15 +338,15 @@ export default function StudentDashboard() {
                         {course.price?.amount > 0 ? (
                           <>
                             <span className="current-price">
-                              {course.price.currency === 'USD' ? '$' : '₹'}
-                              {(course.price.discount
-                                ? course.price.amount * (1 - course.price.discount / 100)
-                                : course.price.amount
-                              ).toFixed(2)}
+                                {normalizePrice(course).currency === 'USD' ? '$' : '₹'}
+                                {(normalizePrice(course).discount
+                                  ? normalizePrice(course).amount * (1 - normalizePrice(course).discount / 100)
+                                  : normalizePrice(course).amount
+                                ).toFixed(2)}
                             </span>
                             {course.price.discount > 0 && (
-                              <span className="original-price">
-                                {course.price.currency === 'USD' ? '$' : '₹'}{course.price.amount.toFixed(2)}
+                                <span className="original-price">
+                                  {normalizePrice(course).currency === 'USD' ? '$' : '₹'}{normalizePrice(course).amount.toFixed(2)}
                               </span>
                             )}
                           </>

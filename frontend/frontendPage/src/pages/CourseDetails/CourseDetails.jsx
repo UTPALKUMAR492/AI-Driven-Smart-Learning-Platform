@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useContext } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getCourseById, enrollInCourse, rateCourse, addToWishlist, removeFromWishlist } from '../../api/courseApi'
-import { getWishlist } from '../../api/studentApi'
+import { getCourseById, enrollInCourse, getEnrolledCourses, addReview } from '../../api/courseApi'
+import { createDummyPayment } from '../../api/paymentApi'
+import PaymentModal from '../../components/PaymentModal/PaymentModal'
 import Loader from '../../components/Loader/Loader'
 import { toast } from 'react-toastify'
 import { AuthContext } from '../../context/AuthContext'
@@ -10,139 +11,182 @@ import './CourseDetails.css'
 export default function CourseDetails() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user } = useContext(AuthContext)
+  const { user, loading: authLoading } = useContext(AuthContext)
+
   const [course, setCourse] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [enrolling, setEnrolling] = useState(false)
   const [isEnrolled, setIsEnrolled] = useState(false)
-  const [isInWishlist, setIsInWishlist] = useState(false)
-  const [activeTab, setActiveTab] = useState('overview')
-  const [expandedSections, setExpandedSections] = useState({})
-  const [showReviewModal, setShowReviewModal] = useState(false)
-  const [reviewData, setReviewData] = useState({ rating: 5, comment: '' })
-  const [activeLesson, setActiveLesson] = useState(null)
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [modalBusy, setModalBusy] = useState(false)
+  const [reviewText, setReviewText] = useState('')
+  const [reviewRating, setReviewRating] = useState(5)
+  const [currentLessonIndex, setCurrentLessonIndex] = useState(0)
+  const [isEmbeddedOpen, setIsEmbeddedOpen] = useState(false)
 
-  useEffect(() => {
-    loadCourse()
-    if (user) {
-      checkWishlist()
-    }
-  }, [id, user])
+  // Reload course when id or auth state changes so protected calls run after login token is restored
+  useEffect(() => { loadCourse() }, [id, user, authLoading])
 
-  const loadCourse = async () => {
+  async function loadCourse() {
+    setLoading(true)
     try {
       const data = await getCourseById(id)
       setCourse(data)
-      // Check if user is enrolled
-      if (user && data.enrolledStudents?.users?.includes(user._id)) {
-        setIsEnrolled(true)
-      }
-      // Set first lesson as active if enrolled
-      if (data.lessons?.length > 0) {
-        setActiveLesson(data.lessons[0])
+      // Use server-provided enrolled flag when available to avoid extra call and persistence issues
+      if (typeof data?.isEnrolled !== 'undefined') setIsEnrolled(Boolean(data.isEnrolled))
+      // check if user is enrolled and load payments only after auth has restored
+      if (user && !authLoading) {
+        try {
+          const enrolled = await getEnrolledCourses()
+          const courseId = String(data._id || id)
+          const has = (enrolled || []).some((c) => {
+            if (!c) return false
+            if (typeof c === 'string' || typeof c === 'number') return String(c) === courseId
+            if (c._id) return String(c._id) === courseId
+            if (c.course) return String(c.course._id || c.course) === courseId
+            return false
+          })
+          setIsEnrolled(Boolean(has))
+        } catch (e) {
+          console.warn('Could not fetch enrolled courses', e)
+        }
+        // payments intentionally not loaded on course page (kept on My Payments page)
+      } else {
+        setIsEnrolled(false)
       }
     } catch (err) {
-      toast.error("Unable to load course")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const checkWishlist = async () => {
-    try {
-      const wishlist = await getWishlist()
-      setIsInWishlist(wishlist.some(c => c._id === id))
-    } catch (err) {
-      console.error('Error checking wishlist:', err)
-    }
+      console.error('loadCourse', err)
+      toast.error('Failed to load course')
+    } finally { setLoading(false) }
   }
 
   const handleEnroll = async () => {
-    if (!user) {
-      toast.info("Please login to enroll")
-      navigate('/login')
+    if (!user) { toast.info('Please login'); navigate('/login'); return }
+    if (isEnrolled) {
+      setIsEmbeddedOpen(true)
       return
     }
-
-    setEnrolling(true)
-    try {
-      await enrollInCourse(id)
-      setIsEnrolled(true)
-      toast.success("Successfully enrolled in course!")
-      loadCourse()
-    } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to enroll")
-    } finally {
-      setEnrolling(false)
+    // If free course, enroll directly
+    const price = course?.price || 0
+    if (!price || course?.isFree) {
+      try {
+        await enrollInCourse(id)
+        toast.success('Enrolled successfully')
+          setIsEnrolled(true)
+          await loadCourse()
+        setIsEmbeddedOpen(true)
+      } catch (err) {
+        const serverMsg = err?.response?.data?.message || err?.info?.message || err?.message
+        toast.error(serverMsg || 'Failed to enroll')
+      }
+      return
     }
+    // Paid course -> open payment modal
+    setShowPaymentModal(true)
   }
 
-  const handleWishlist = async () => {
-    if (!user) {
-      toast.info("Please login to add to wishlist")
-      navigate('/login')
-      return
-    }
+  const handleDummyPayment = async (status) => {
+    // open payment modal (we don't show payments on course page)
+    if (!user) { toast.info('Please login'); navigate('/login'); return }
+    setShowPaymentModal(true)
+  }
 
+  const handleModalPay = async (payload, forcedStatus) => {
+    const status = forcedStatus || 'success'
     try {
-      if (isInWishlist) {
-        await removeFromWishlist(id)
-        setIsInWishlist(false)
-        toast.success("Removed from wishlist")
-      } else {
-        await addToWishlist(id)
-        setIsInWishlist(true)
-        toast.success("Added to wishlist")
+      setModalBusy(true)
+      const amount = (payload && payload.amount) || course?.price || 0
+      const body = { courseId: id, amount, status: status === 'rejected' ? 'rejected' : 'success', metadata: (payload && payload.metadata) || { method: payload?.method || 'card' } }
+      const res = await createDummyPayment(body)
+      // show single toast for recording
+      const serverMessage = res?.message || res?.data?.message
+      if (serverMessage) toast.success(serverMessage)
+      setShowPaymentModal(false)
+      // Auto-enroll after successful payment
+      if (body.status === 'success') {
+        try {
+          await enrollInCourse(id)
+          await loadCourse()
+          setIsEmbeddedOpen(true)
+        } catch (enErr) {
+          // if already enrolled, treat as success and open course
+          const emsg = enErr?.info?.message || enErr?.response?.data?.message || enErr?.message || ''
+          const status = enErr?.status || enErr?.info?.status || enErr?.response?.status
+          if (status === 400 && String(emsg).toLowerCase().includes('already')) {
+            toast.info('Already enrolled — opening course')
+            setIsEmbeddedOpen(true)
+          } else {
+            const msg = enErr?.response?.data?.message || enErr?.info?.message || enErr?.message
+            toast.error(msg || 'Enrollment failed after payment')
+          }
+        }
       }
     } catch (err) {
-      toast.error("Failed to update wishlist")
+      console.error('Payment error', err)
+      const msg = err?.response?.data?.message || err?.message || 'Payment failed'
+      toast.error(msg)
+    } finally {
+      setModalBusy(false)
     }
   }
 
-  const handleReviewSubmit = async (e) => {
+  const handleSubmitReview = async (e) => {
     e.preventDefault()
+    if (!user) { toast.info('Please login to review'); navigate('/login'); return }
     try {
-      await rateCourse(id, reviewData)
-      toast.success("Review submitted successfully!")
-      setShowReviewModal(false)
-      setReviewData({ rating: 5, comment: '' })
-      loadCourse()
+      await addReview(id, { rating: reviewRating, comment: reviewText })
+      toast.success('Review submitted')
+      setReviewText('')
+      setReviewRating(5)
+      await loadCourse()
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to submit review")
+      console.error('Review error', err)
+      toast.error(err?.response?.data?.message || 'Could not submit review')
     }
   }
 
-  const toggleSection = (index) => {
-    setExpandedSections(prev => ({
-      ...prev,
-      [index]: !prev[index]
-    }))
-  }
+  // Return normalized media info { type: 'youtube'|'video'|'none', url, externalUrl? }
+  const getMediaInfo = (url) => {
+    if (!url) return { type: 'none', url: '' }
+    try {
+      let raw = String(url).trim()
+      // If relative path, prefix API url
+      if (raw.startsWith('/')) raw = (import.meta.env.VITE_API_URL || 'http://localhost:5000') + raw
 
-  const formatDuration = (minutes) => {
-    if (!minutes) return '0 min'
-    const hrs = Math.floor(minutes / 60)
-    const mins = minutes % 60
-    if (hrs > 0) {
-      return `${hrs}h ${mins}m`
-    }
-    return `${mins} min`
-  }
+      // If direct video file (mp4, webm, ogg)
+      if (/\.(mp4|webm|ogg)(\?.*)?$/i.test(raw)) {
+        return { type: 'video', url: raw }
+      }
 
-  const renderStars = (rating, interactive = false, onRate = null) => {
-    const stars = []
-    for (let i = 1; i <= 5; i++) {
-      stars.push(
-        <span
-          key={i}
-          className={`star ${i <= rating ? 'filled' : ''} ${interactive ? 'interactive' : ''}`}
-          onClick={() => interactive && onRate && onRate(i)}
-        >
-          ★
-        </span>
-      )
+      const lower = raw.toLowerCase()
+      if (lower.includes('youtube.com') || lower.includes('youtu.be')) {
+        // try URL parsing first
+        let vid = null
+        try {
+          const parsed = new URL(raw)
+          vid = parsed.searchParams.get('v')
+          if (!vid) {
+            const parts = parsed.pathname.split('/').filter(Boolean)
+            // last segment often contains the id (shorts, embed, youtu.be style)
+            vid = parts.length ? parts[parts.length - 1] : null
+          }
+        } catch (e) {
+          // fallback regex
+          const m = raw.match(/(?:v=|\/|be\/|embed\/|shorts\/)([A-Za-z0-9_-]{6,})/) // allow 6+ chars
+          vid = m ? m[1] : null
+        }
+        if (vid) {
+          return { type: 'youtube', url: `https://www.youtube.com/embed/${vid}`, externalUrl: `https://www.youtube.com/watch?v=${vid}` }
+        }
+      }
+
+      // Fallback: absolute http(s) treat as video source (some CDNs serve direct mp4 without extension)
+      if (/^https?:\/\//i.test(raw)) return { type: 'video', url: raw }
+
+      // last resort: return as video url (might work if served correctly)
+      return { type: 'video', url: raw }
+    } catch (e) {
+      return { type: 'none', url: '' }
     }
-    return stars
   }
 
   if (loading) return <Loader />
@@ -154,40 +198,41 @@ export default function CourseDetails() {
 
   return (
     <div className="course-details-page">
-      {/* Course Header */}
-      <div className="course-header-section">
-        <div className="course-header-content">
-          <nav className="breadcrumb">
-            <span onClick={() => navigate('/courses')}>Courses</span>
-            <span className="separator">›</span>
-            <span>{course.category || 'Development'}</span>
-            <span className="separator">›</span>
-            <span className="current">{course.title}</span>
-          </nav>
+      <h1 className="course-title">{course.title || 'Course'}</h1>
+      <p className="course-subtitle">{course.subtitle}</p>
+      <div className="course-actions">
+        <button className="btn-primary" onClick={handleEnroll}>{isEnrolled ? 'Continue learning' : 'Enroll / Start'}</button>
+        {!isEnrolled && (
+          <button className="btn-outline" style={{ marginLeft: 12 }} onClick={() => setShowPaymentModal(true)}>Buy course</button>
+        )}
+      </div>
 
-          <h1 className="course-title">{course.title}</h1>
-          <p className="course-subtitle">{course.description}</p>
-
-          <div className="course-meta">
-            {course.rating?.average > 0 && (
-              <div className="meta-item rating">
-                <span className="rating-number">{course.rating.average.toFixed(1)}</span>
-                <div className="stars">{renderStars(Math.round(course.rating.average))}</div>
-                <span className="rating-count">({course.rating.count} ratings)</span>
-              </div>
+      <div className="course-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 20, marginTop: 20 }}>
+        <div className="course-main">
+          {/* Video / Lesson player */}
+          <div className="player-wrapper" style={{ background: '#000', minHeight: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {course.lessons && course.lessons.length > 0 ? (
+              (() => {
+                const mediaInfo = getMediaInfo(course.lessons[currentLessonIndex]?.videoUrl)
+                if (mediaInfo.type === 'youtube') {
+                  return (
+                    <div style={{ width: '100%' }}>
+                      <iframe title="lesson-video" src={mediaInfo.url} style={{ width: '100%', height: 420, border: 0 }} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
+                      <div style={{ marginTop: 8 }}>
+                        <a href={mediaInfo.externalUrl || mediaInfo.url} target="_blank" rel="noopener noreferrer">Open on YouTube</a>
+                      </div>
+                    </div>
+                  )
+                }
+                if (mediaInfo.type === 'video') {
+                  const poster = getMediaInfo(course.thumbnail).url || undefined
+                  return <video controls crossOrigin="anonymous" poster={poster} style={{ width: '100%' }} src={mediaInfo.url} />
+                }
+                return <div style={{ color: '#fff' }}>No playable lesson available</div>
+              })()
+            ) : (
+              <div style={{ color: '#fff' }}>No playable lesson available</div>
             )}
-            <div className="meta-item">
-              <span className="icon">👥</span>
-              <span>{course.enrolledStudents?.count || 0} students</span>
-            </div>
-            <div className="meta-item">
-              <span className="icon">📚</span>
-              <span>{course.lessons?.length || 0} lessons</span>
-            </div>
-            <div className="meta-item">
-              <span className="icon">⏱️</span>
-              <span>{formatDuration(course.totalDuration)}</span>
-            </div>
           </div>
 
           <div className="course-instructor">
@@ -202,456 +247,146 @@ export default function CourseDetails() {
             </div>
           </div>
 
-          <div className="course-info-badges">
-            <span className="badge">
-              <span className="icon">📅</span>
-              Last updated {new Date(course.updatedAt).toLocaleDateString()}
-            </span>
-            <span className="badge">
-              <span className="icon">🌐</span>
-              {course.language || 'English'}
-            </span>
-            <span className="badge level">
-              <span className="icon">📊</span>
-              {course.level || 'All Levels'}
-            </span>
-          </div>
-        </div>
-
-        {/* Sticky Sidebar */}
-        <div className="course-sidebar">
-          <div className="sidebar-card">
-            {course.thumbnail ? (
-              <div className="preview-video" onClick={() => activeLesson?.isFree && setActiveTab('content')}>
-                <img src={course.thumbnail} alt={course.title} />
-                <div className="play-overlay">
-                  <span className="play-icon">▶</span>
-                  <span className="preview-text">Preview this course</span>
-                </div>
-              </div>
-            ) : (
-              <div className="preview-placeholder">
-                <span className="icon">🎬</span>
-              </div>
-            )}
-
-            <div className="sidebar-content">
-              <div className="price-section">
-                {course.price?.discount > 0 ? (
-                  <>
-                    <span className="current-price">
-                      {course.price.currency === 'USD' ? '$' : '₹'}{discountedPrice?.toFixed(2)}
-                    </span>
-                    <span className="original-price">
-                      {course.price.currency === 'USD' ? '$' : '₹'}{course.price.amount?.toFixed(2)}
-                    </span>
-                    <span className="discount-badge">{course.price.discount}% off</span>
-                  </>
-                ) : course.price?.amount > 0 ? (
-                  <span className="current-price">
-                    {course.price.currency === 'USD' ? '$' : '₹'}{course.price.amount?.toFixed(2)}
-                  </span>
-                ) : (
-                  <span className="current-price free">Free</span>
-                )}
-              </div>
-
-              {isEnrolled ? (
-                <button className="btn-go-to-course" onClick={() => setActiveTab('content')}>
-                  Go to Course
-                </button>
-              ) : (
-                <>
-                  <button
-                    className="btn-enroll"
-                    onClick={handleEnroll}
-                    disabled={enrolling}
-                  >
-                    {enrolling ? 'Enrolling...' : 'Enroll Now'}
-                  </button>
-                  <button className="btn-cart">Add to Cart</button>
-                </>
-              )}
-
-              <button
-                className={`btn-wishlist ${isInWishlist ? 'active' : ''}`}
-                onClick={handleWishlist}
-              >
-                <span className="heart">{isInWishlist ? '❤️' : '🤍'}</span>
-                {isInWishlist ? 'Remove from Wishlist' : 'Add to Wishlist'}
-              </button>
-
-              <div className="guarantee">
-                <span className="icon">🔒</span>
-                30-Day Money-Back Guarantee
-              </div>
-
-              <div className="course-includes">
-                <h4>This course includes:</h4>
-                <ul>
-                  <li>
-                    <span className="icon">🎥</span>
-                    {formatDuration(course.totalDuration)} on-demand video
-                  </li>
-                  <li>
-                    <span className="icon">📚</span>
-                    {course.lessons?.length || 0} lessons
-                  </li>
-                  <li>
-                    <span className="icon">📱</span>
-                    Access on mobile and TV
-                  </li>
-                  <li>
-                    <span className="icon">🏆</span>
-                    Certificate of completion
-                  </li>
-                  <li>
-                    <span className="icon">♾️</span>
-                    Full lifetime access
-                  </li>
-                </ul>
-              </div>
-
-              <div className="share-section">
-                <span>Share this course:</span>
-                <div className="share-buttons">
-                  <button className="share-btn">📧</button>
-                  <button className="share-btn">🔗</button>
-                  <button className="share-btn">📱</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Course Content */}
-      <div className="course-main-content">
-        {/* Tabs */}
-        <div className="course-tabs">
-          <button
-            className={`tab ${activeTab === 'overview' ? 'active' : ''}`}
-            onClick={() => setActiveTab('overview')}
-          >
-            Overview
-          </button>
-          <button
-            className={`tab ${activeTab === 'content' ? 'active' : ''}`}
-            onClick={() => setActiveTab('content')}
-          >
-            Course Content
-          </button>
-          <button
-            className={`tab ${activeTab === 'reviews' ? 'active' : ''}`}
-            onClick={() => setActiveTab('reviews')}
-          >
-            Reviews
-          </button>
-          <button
-            className={`tab ${activeTab === 'instructor' ? 'active' : ''}`}
-            onClick={() => setActiveTab('instructor')}
-          >
-            Instructor
-          </button>
-        </div>
-
-        {/* Tab Content */}
-        <div className="tab-content">
-          {activeTab === 'overview' && (
-            <div className="overview-tab">
-              {/* What You'll Learn */}
-              {course.whatYouWillLearn?.length > 0 && (
-                <section className="learn-section">
-                  <h2>What you'll learn</h2>
-                  <div className="learn-grid">
-                    {course.whatYouWillLearn.map((item, index) => (
-                      <div key={index} className="learn-item">
-                        <span className="check">✓</span>
-                        <span>{item}</span>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Requirements */}
-              {course.requirements?.length > 0 && (
-                <section className="requirements-section">
-                  <h2>Requirements</h2>
-                  <ul className="requirements-list">
-                    {course.requirements.map((req, index) => (
-                      <li key={index}>
-                        <span className="bullet">•</span>
-                        {req}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-
-              {/* Description */}
-              <section className="description-section">
-                <h2>Description</h2>
-                <div className="description-content">
-                  {course.description}
-                </div>
-              </section>
-
-              {/* Topics */}
-              {course.topics?.length > 0 && (
-                <section className="topics-section">
-                  <h2>Topics Covered</h2>
-                  <div className="topics-grid">
-                    {course.topics.map((topic) => (
-                      <div key={topic._id} className="topic-tag">
-                        {topic.title}
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              )}
-            </div>
-          )}
-
-          {activeTab === 'content' && (
-            <div className="content-tab">
-              <div className="content-header">
-                <h2>Course Content</h2>
-                <div className="content-stats">
-                  <span>{course.lessons?.length || 0} lessons</span>
-                  <span>•</span>
-                  <span>{formatDuration(course.totalDuration)} total length</span>
-                </div>
-              </div>
-
-              {/* Video Player (for enrolled users) */}
-              {isEnrolled && activeLesson && (
-                <div className="video-player-section">
-                  <div className="video-player">
-                    {activeLesson.videoUrl ? (
-                      <video
-                        controls
-                        src={activeLesson.videoUrl}
-                        poster={course.thumbnail}
-                      >
-                        Your browser does not support the video tag.
-                      </video>
-                    ) : (
-                      <div className="no-video">
-                        <span className="icon">🎬</span>
-                        <p>Video content will be available soon</p>
-                      </div>
-                    )}
-                  </div>
-                  <div className="current-lesson-info">
-                    <h3>{activeLesson.title}</h3>
-                    <p>{activeLesson.description}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Lessons List */}
-              <div className="lessons-accordion">
-                {course.lessons?.map((lesson, index) => (
-                  <div
-                    key={lesson._id || index}
-                    className={`lesson-item ${expandedSections[index] ? 'expanded' : ''} ${activeLesson?._id === lesson._id ? 'active' : ''}`}
-                  >
-                    <div
-                      className="lesson-header"
-                      onClick={() => {
-                        toggleSection(index)
-                        if (isEnrolled || lesson.isFree) {
-                          setActiveLesson(lesson)
+          {/* Description & Notes */}
+          <div className="lesson-notes" style={{ marginTop: 16 }}>
+            <h4>Description</h4>
+            <div style={{ marginBottom: 12 }}>{course.description || 'No description available.'}</div>
+            <h4>Notes</h4>
+                    <div>
+                      {(() => {
+                        const notes = course.lessons && course.lessons[currentLessonIndex]?.notes
+                        if (!notes) return 'No notes for this lesson.'
+                        // If it's a URL
+                        try {
+                          const raw = String(notes).trim()
+                          if (/^https?:\/\//i.test(raw)) {
+                            // PDF file
+                            if (/\.pdf(\?.*)?$/i.test(raw)) {
+                              return (
+                                <div>
+                                  <div style={{ marginBottom: 8 }}>
+                                    <a href={raw} target="_blank" rel="noopener noreferrer">Open lesson notes (PDF)</a>
+                                  </div>
+                                  <iframe src={raw} style={{ width: '100%', height: 420, border: 0 }} title="lesson-notes-pdf" />
+                                </div>
+                              )
+                            }
+                            // other file/url -> show link
+                            return <a href={raw} target="_blank" rel="noopener noreferrer">Open lesson notes</a>
+                          }
+                        } catch (e) {
+                          // fallthrough to render as text
                         }
-                      }}
-                    >
-                      <div className="lesson-info">
-                        <span className="lesson-number">{index + 1}</span>
-                        <span className="lesson-title">{lesson.title}</span>
-                        {lesson.isFree && !isEnrolled && (
-                          <span className="free-badge">Preview</span>
-                        )}
-                        {!lesson.isFree && !isEnrolled && (
-                          <span className="locked-icon">🔒</span>
-                        )}
-                      </div>
-                      <div className="lesson-meta">
-                        <span className="lesson-duration">{formatDuration(lesson.duration)}</span>
-                        <span className={`expand-icon ${expandedSections[index] ? 'expanded' : ''}`}>▼</span>
-                      </div>
+                        // otherwise render as plain text (allow basic newlines)
+                        return <div style={{ whiteSpace: 'pre-wrap' }}>{String(notes)}</div>
+                      })()}
                     </div>
-                    {expandedSections[index] && (
-                      <div className="lesson-content">
-                        <p>{lesson.description}</p>
-                        {(isEnrolled || lesson.isFree) && (
-                          <button
-                            className="btn-play-lesson"
-                            onClick={() => setActiveLesson(lesson)}
-                          >
-                            ▶ Play Lesson
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
+          </div>
+
+          {/* Reviews */}
+          <div className="course-reviews" style={{ marginTop: 18 }}>
+            <h3>Reviews</h3>
+            {Array.isArray(course.reviews) && course.reviews.length > 0 ? (
+              <ul>
+                {course.reviews.map(r => (
+                  <li key={r._id} style={{ marginBottom: 8 }}>
+                    <strong>{r.user?.name || 'User'}</strong> — <em>{r.rating} / 5</em>
+                    <div style={{ fontSize: 13 }}>{r.comment}</div>
+                  </li>
                 ))}
-              </div>
-            </div>
-          )}
+              </ul>
+            ) : <div>No reviews yet</div>}
 
-          {activeTab === 'reviews' && (
-            <div className="reviews-tab">
-              <div className="reviews-header">
-                <h2>Student Reviews</h2>
-                {isEnrolled && (
-                  <button
-                    className="btn-write-review"
-                    onClick={() => setShowReviewModal(true)}
-                  >
-                    Write a Review
-                  </button>
-                )}
-              </div>
-
-              {/* Rating Summary */}
-              <div className="rating-summary">
-                <div className="rating-big">
-                  <span className="number">{course.rating?.average?.toFixed(1) || '0.0'}</span>
-                  <div className="stars">{renderStars(Math.round(course.rating?.average || 0))}</div>
-                  <span className="total">Course Rating</span>
-                </div>
-                <div className="rating-bars">
-                  {[5, 4, 3, 2, 1].map(star => {
-                    const count = course.reviews?.filter(r => r.rating === star).length || 0
-                    const percentage = course.reviews?.length > 0 ? (count / course.reviews.length) * 100 : 0
-                    return (
-                      <div key={star} className="rating-bar-row">
-                        <div className="stars-small">{renderStars(star)}</div>
-                        <div className="bar">
-                          <div className="fill" style={{ width: `${percentage}%` }}></div>
-                        </div>
-                        <span className="percentage">{percentage.toFixed(0)}%</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-
-              {/* Reviews List */}
-              <div className="reviews-list">
-                {course.reviews?.length > 0 ? (
-                  course.reviews.map((review, index) => (
-                    <div key={index} className="review-card">
-                      <div className="review-header">
-                        <img
-                          src={review.user?.avatar || `https://ui-avatars.com/api/?name=${review.user?.username || 'User'}&background=667eea&color=fff`}
-                          alt={review.user?.username}
-                          className="reviewer-avatar"
-                        />
-                        <div className="reviewer-info">
-                          <span className="reviewer-name">{review.user?.username || 'Anonymous'}</span>
-                          <div className="review-meta">
-                            <div className="stars">{renderStars(review.rating)}</div>
-                            <span className="review-date">
-                              {new Date(review.createdAt).toLocaleDateString()}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      <p className="review-comment">{review.comment}</p>
-                    </div>
-                  ))
-                ) : (
-                  <div className="no-reviews">
-                    <span className="icon">📝</span>
-                    <p>No reviews yet. Be the first to review this course!</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'instructor' && (
-            <div className="instructor-tab">
-              <div className="instructor-profile">
-                <img
-                  src={course.instructor?.avatar || `https://ui-avatars.com/api/?name=${course.instructor?.username || 'Instructor'}&background=667eea&color=fff&size=200`}
-                  alt={course.instructor?.username}
-                  className="instructor-avatar-large"
-                />
-                <div className="instructor-info">
-                  <h2>{course.instructor?.username || 'Unknown Instructor'}</h2>
-                  <p className="instructor-title">{course.instructor?.bio || 'Professional Instructor'}</p>
-                  <div className="instructor-stats">
-                    <div className="stat">
-                      <span className="icon">⭐</span>
-                      <span className="value">{course.rating?.average?.toFixed(1) || '0.0'} Instructor Rating</span>
-                    </div>
-                    <div className="stat">
-                      <span className="icon">📝</span>
-                      <span className="value">{course.rating?.count || 0} Reviews</span>
-                    </div>
-                    <div className="stat">
-                      <span className="icon">👥</span>
-                      <span className="value">{course.enrolledStudents?.count || 0} Students</span>
-                    </div>
-                    <div className="stat">
-                      <span className="icon">🎓</span>
-                      <span className="value">1 Course</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="instructor-bio">
-                <h3>About the Instructor</h3>
-                <p>
-                  {course.instructor?.bio ||
-                    'This instructor is passionate about teaching and helping students achieve their learning goals. With years of experience in the field, they bring practical knowledge and engaging teaching methods to their courses.'}
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Review Modal */}
-      {showReviewModal && (
-        <div className="modal-overlay" onClick={() => setShowReviewModal(false)}>
-          <div className="review-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Write a Review</h3>
-              <button className="close-btn" onClick={() => setShowReviewModal(false)}>×</button>
-            </div>
-            <form onSubmit={handleReviewSubmit}>
-              <div className="rating-select">
-                <label>Your Rating:</label>
-                <div className="stars-interactive">
-                  {renderStars(reviewData.rating, true, (rating) => setReviewData(prev => ({ ...prev, rating })))}
-                </div>
-              </div>
-              <div className="comment-input">
-                <label>Your Review:</label>
-                <textarea
-                  value={reviewData.comment}
-                  onChange={(e) => setReviewData(prev => ({ ...prev, comment: e.target.value }))}
-                  placeholder="Share your experience with this course..."
-                  rows={5}
-                  required
-                />
-              </div>
-              <div className="modal-actions">
-                <button type="button" className="btn-cancel" onClick={() => setShowReviewModal(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn-submit">
-                  Submit Review
-                </button>
-              </div>
+            <form onSubmit={handleSubmitReview} style={{ marginTop: 12 }}>
+              <h4>Submit a review</h4>
+              <select value={reviewRating} onChange={e => setReviewRating(Number(e.target.value))}>
+                <option value={5}>5 - Excellent</option>
+                <option value={4}>4 - Good</option>
+                <option value={3}>3 - Okay</option>
+                <option value={2}>2 - Poor</option>
+                <option value={1}>1 - Terrible</option>
+              </select>
+              <textarea placeholder="Write your review" value={reviewText} onChange={e => setReviewText(e.target.value)} style={{ display: 'block', width: '100%', minHeight: 80, marginTop: 8 }} />
+              <button className="btn-primary" type="submit" style={{ marginTop: 8 }}>Submit review</button>
             </form>
           </div>
         </div>
+
+        <aside className="course-side" style={{ borderLeft: '1px solid #eee', paddingLeft: 16 }}>
+          <div className="instructor-card" style={{ marginBottom: 12 }}>
+            <h4>Instructor</h4>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              {course.instructor?.avatar || course.instructorAvatar ? (
+                <img src={getMediaInfo(course.instructor?.avatar || course.instructorAvatar).url || (course.instructor?.avatar || course.instructorAvatar)} alt="avatar" style={{ width: 64, height: 64, borderRadius: 8, objectFit: 'cover' }} />
+              ) : null}
+              <div>
+                <div style={{ fontWeight: 600 }}>{course.instructor?.name || course.instructorName}</div>
+                <div style={{ fontSize: 13, color: '#666' }}>{course.instructor?.headline || course.instructorBio || ''}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="course-meta">
+            <div><strong>Price:</strong> {course.isFree ? 'Free' : `₹ ${course.price || 0}`}</div>
+            <div><strong>Duration:</strong> {course.totalDuration || 0} mins</div>
+            <div><strong>Lessons:</strong> {course.totalLessons || (course.lessons && course.lessons.length) || 0}</div>
+          </div>
+        </aside>
+      </div>
+
+      {/* Embedded right-side player panel (small overlay) */}
+      {isEmbeddedOpen && (
+        <div className="embedded-panel" style={{ position: 'fixed', right: 0, top: 80, width: 420, height: '80%', background: '#fff', boxShadow: '-6px 0 24px rgba(0,0,0,0.08)', padding: 12, zIndex: 2000 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h4>Player</h4>
+            <button className="btn-secondary" onClick={() => setIsEmbeddedOpen(false)}>Close</button>
+          </div>
+          <div style={{ marginTop: 8 }}>
+              {(() => {
+                const mediaInfo = getMediaInfo(course.lessons && course.lessons[currentLessonIndex]?.videoUrl)
+                if (!mediaInfo || mediaInfo.type === 'none') return <div>No playable lesson available</div>
+                if (mediaInfo.type === 'youtube') {
+                  return (
+                    <div>
+                      <iframe title="lesson-video-embed" src={mediaInfo.url} style={{ width: '100%', height: 240, border: 0 }} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
+                      <div style={{ marginTop: 8 }}>
+                        <a href={mediaInfo.externalUrl || mediaInfo.url} target="_blank" rel="noopener noreferrer">Open on YouTube</a>
+                      </div>
+                      <div style={{ marginTop: 8 }}>
+                        <strong>{course.lessons && course.lessons[currentLessonIndex]?.title}</strong>
+                        <div style={{ fontSize: 13, color: '#444' }}>{course.lessons && course.lessons[currentLessonIndex]?.description}</div>
+                      </div>
+                    </div>
+                  )
+                }
+                return (
+                  <>
+                    <video controls style={{ width: '100%' }} src={mediaInfo.url} />
+                    <div style={{ marginTop: 8 }}>
+                      <strong>{course.lessons && course.lessons[currentLessonIndex]?.title}</strong>
+                      <div style={{ fontSize: 13, color: '#444' }}>{course.lessons && course.lessons[currentLessonIndex]?.description}</div>
+                      {(() => {
+                        const notes = course.lessons && course.lessons[currentLessonIndex]?.notes
+                        if (!notes) return null
+                        const raw = String(notes).trim()
+                        if (/^https?:\/\//i.test(raw)) {
+                          if (/\.pdf(\?.*)?$/i.test(raw)) {
+                            return (<div style={{ marginTop: 8 }}><a href={raw} target="_blank" rel="noopener noreferrer">Open lesson notes (PDF)</a></div>)
+                          }
+                          return (<div style={{ marginTop: 8 }}><a href={raw} target="_blank" rel="noopener noreferrer">Open lesson notes</a></div>)
+                        }
+                        return (<div style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>{raw}</div>)
+                      })()}
+                    </div>
+                  </>
+                )
+              })()}
+          </div>
+        </div>
       )}
+      <PaymentModal open={showPaymentModal} onClose={() => setShowPaymentModal(false)} onPay={handleModalPay} amount={course?.price} />
     </div>
   )
 }
+
+  

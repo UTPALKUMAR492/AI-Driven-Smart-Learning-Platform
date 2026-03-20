@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+  <rect width="100%" height="100%" fill="#f3f4f6"/>
+  <rect x="60" y="60" width="1080" height="120" rx="12" fill="#111827" opacity="0.95" />
+  <text x="120" y="120" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="28">Teacher Dashboard — Create Course (Placeholder)</text>
+  <g transform="translate(80,200)">
+    <rect width="1040" height="420" rx="8" fill="#fff" stroke="#e5e7eb"/>
+    <text x="30" y="40" font-family="Arial" font-size="22" fill="#111827">Course title: <tspan font-weight="700">Example Course</tspan></text>
+    <text x="30" y="80" font-family="Arial" font-size="18" fill="#4b5563">Lessons (3):</text>
+    <g fill="#111827" font-family="Arial" font-size="16">
+      <text x="60" y="120">1. Introduction — notes: /uploads/notes/intro.pdf</text>
+      <text x="60" y="150">2. Chapter 1 — notes: /uploads/notes/ch1.pdf</text>
+      <text x="60" y="180">3. Chapter 2 — notes: /uploads/notes/ch2.pdf</text>
+    </g>
+    <text x="30" y="260" font-family="Arial" font-size="16" fill="#059669">Upload notes via /api/upload/notes → returns URL</text>
+  </g>
+</svg>

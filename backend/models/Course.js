@@ -4,6 +4,7 @@ const lessonSchema = new mongoose.Schema({
   title: { type: String, required: true },
   type: { type: String, enum: ["video", "article", "quiz"], default: "video" },
   content: String, // URL for video or text content
+  notes: String,
   duration: { type: Number, default: 0 }, // in minutes
   order: { type: Number, default: 0 },
   isPreview: { type: Boolean, default: false }

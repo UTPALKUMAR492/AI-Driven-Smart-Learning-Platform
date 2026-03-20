@@ -2,12 +2,20 @@
 .teacher-dashboard {
   min-height: 100vh;
   background: #f8f9fa;
+  /* space for fixed header */
+  padding-top: 220px;
 }
 
 /* Header */
 .teacher-header-section {
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
   padding: 2rem 0 0;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 900;
+  box-shadow: 0 4px 20px rgba(2,6,23,0.15);
   color: white;
 }
 
@@ -398,6 +406,33 @@
   gap: 1rem;
   padding: 0.75rem 1rem;
   background: white;
+}
+
+/* Modal - AI Generate Questions */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2,6,23,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+}
+.modal-content {
+  width: 680px;
+  max-width: calc(100% - 40px);
+  background: white;
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 10px 40px rgba(2,6,23,0.35);
+}
+.modal-content h3 { margin: 0 0 0.5rem; font-size: 1.15rem }
+.modal-content form { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem 1rem }
+.modal-content label { display:flex; flex-direction: column; font-weight:600; color:#374151 }
+.modal-content textarea, .modal-content select, .modal-content input[type="number"] { padding:0.6rem; border-radius:8px; border:1px solid #e5e7eb }
+.modal-actions { grid-column:1/-1; margin-top:8px; display:flex; gap:8px }
+.modal-content button[type="submit"] { background: linear-gradient(90deg,#667eea,#764ba2); color:#fff; border:none; padding:8px 12px; border-radius:8px }
+.modal-content .btn-secondary { background:#f3f4f6; border:none; padding:8px 12px; border-radius:8px }
   border: 1px solid #e5e7eb;
   border-radius: 8px;
 }
@@ -510,7 +545,7 @@
 
 .courses-table .table-header,
 .courses-table .table-row {
-  grid-template-columns: 2.5fr 1fr 1fr 1fr 1fr;
+  grid-template-columns: 2.5fr 1fr 0.8fr 0.8fr 0.8fr 1fr; /* Course | Category | Students | Rating | Status | Actions */
 }
 
 .quizzes-table .table-header,
@@ -539,6 +574,21 @@
 .table-row:last-child {
   border-bottom: none;
 }
+
+/* Results modal table layout */
+.results-list .table-header,
+.results-list .table-row {
+  display: grid;
+  grid-template-columns: 0.6fr 1.4fr 1fr 0.8fr 0.6fr 0.8fr 1fr; /* rank, student, email, score, %, status, completed */
+  gap: 1rem;
+  padding: 0.6rem 0.8rem;
+  align-items: center;
+}
+
+.results-list .table-header { background: #fafafa; padding: 0.75rem 0.8rem; font-weight: 600; color: #6b7280 }
+.results-list .table-row { border-bottom: 1px solid #f3f4f6 }
+
+.results-list .table-row .td { padding: 6px 0 }
 
 .course-cell,
 .student-cell {
@@ -637,6 +687,14 @@
   .actions-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+@media (max-width: 768px) {
+  .teacher-dashboard { padding-top: 180px; }
+}
+
+@media (max-width: 480px) {
+  .teacher-dashboard { padding-top: 150px; }
 }
 
 @media (max-width: 768px) {

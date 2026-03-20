@@ -7,6 +7,90 @@ import Course from "../models/Course.js";
 
 const router = express.Router();
 
+// Server-side cart endpoints
+router.get('/cart', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).populate({ path: 'cart.course', select: 'title thumbnail price' });
+    res.json(user.cart || []);
+  } catch (err) {
+    res.status(500).json({ message: 'Could not fetch cart', error: err.message });
+  }
+});
+
+router.post('/cart', protect, async (req, res) => {
+  try {
+    const { courseId } = req.body;
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user.cart.some(c => c.course?.toString() === courseId)) {
+      user.cart.push({ course: courseId });
+      await user.save();
+    }
+    await user.populate({ path: 'cart.course', select: 'title thumbnail price' });
+    res.json(user.cart);
+  } catch (err) {
+    res.status(500).json({ message: 'Could not add to cart', error: err.message });
+  }
+});
+
+router.delete('/cart/:courseId', protect, async (req, res) => {
+  try {
+    const { courseId } = req.params;
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    user.cart = user.cart.filter(c => c.course?.toString() !== courseId);
+    await user.save();
+    res.json({ message: 'Removed from cart' });
+  } catch (err) {
+    res.status(500).json({ message: 'Could not remove from cart', error: err.message });
+  }
+});
+
+// Attendance summary: days active in last 30 days
+router.get('/attendance', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const user = await User.findById(userId);
+
+    // Collect activity timestamps from quiz results and enrolled progress
+    const results = await Result.find({ userId }).select('completedAt');
+    let timestamps = results.map(r => r.completedAt || r.createdAt).filter(Boolean);
+
+    user.enrolledCourses?.forEach(en => {
+      (en.progress || []).forEach(p => {
+        if (p.completedAt) timestamps.push(p.completedAt);
+      });
+    });
+
+    // Include lastActiveDate
+    if (user.lastActiveDate) timestamps.push(user.lastActiveDate);
+
+    const now = new Date();
+    const days = new Set();
+    timestamps.forEach(ts => {
+      const d = new Date(ts);
+      const diffDays = Math.floor((now - d) / (1000 * 60 * 60 * 24));
+      if (diffDays >= 0 && diffDays < 30) {
+        days.add(d.toISOString().slice(0,10));
+      }
+    });
+
+    res.json({ daysActiveLast30: days.size });
+  } catch (err) {
+    res.status(500).json({ message: 'Could not fetch attendance', error: err.message });
+  }
+});
+
+// Get user badges (gamification)
+router.get('/badges', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('badges');
+    res.json(user.badges || []);
+  } catch (err) {
+    res.status(500).json({ message: 'Could not fetch badges', error: err.message });
+  }
+});
+
 // Get student stats (real data from database)
 router.get("/stats", protect, async (req, res) => {
   try {
