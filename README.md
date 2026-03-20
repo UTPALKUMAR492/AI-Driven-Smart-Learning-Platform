@@ -1,6 +1,6 @@
-# SmartLearning
+# AI - Driven Smart Learning Platform
 
-SmartLearning is a full-stack learning management / course platform with teacher and student roles. It includes features such as course creation, video lessons, notes (PDF) uploads, quizzes, results tracking, and a teacher dashboard with analytics and result viewing.
+AI-Driven Smart Learning Platform is a full-stack learning management / course platform with teacher, student and Admin roles. It includes features such as course creation, video lessons, notes (PDF) uploads, Ai Generate quizzes, results tracking, and a teacher dashboard with analytics and result viewing.
 
 This repository contains two main apps:
 - backend/ — Node.js + Express API and admin/teacher/student routes, MongoDB models, and uploads.
@@ -10,7 +10,7 @@ This repository contains two main apps:
 
 ## Project Overview
 
-SmartLearning was built to provide an online learning platform where teachers can create courses (video lessons, downloadable notes), add quizzes, review quiz results, and see analytics about students. Students can enroll in courses, watch lessons, download notes, take quizzes, and view progress.
+AI - Driven Smart Learning Platform was built to provide an online learning platform where teachers can create courses (video lessons, downloadable notes), add quizzes, review quiz results, and see analytics about students. Students can enroll in courses, watch lessons, download notes, take quizzes, and view progress.
 
 Key capabilities:
 - Teacher flows: create/update courses, upload notes/videos, create quizzes, view enrolled students and quiz attempts.
