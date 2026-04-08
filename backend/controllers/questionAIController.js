@@ -10,6 +10,7 @@ export const generateQuestions = async (req, res) => {
     const { courseId, topic, numQuestions = 10 } = req.body;
     if (!courseId || !topic) return res.status(400).json({ message: 'Missing courseId or topic' });
     let questions = [];
+    let fallbackReason = null;
     // try to fetch course details to provide context to LLM
     let courseInfo = null
     try {
@@ -20,9 +21,11 @@ export const generateQuestions = async (req, res) => {
       questions = await generateQuestionsWithLLM({ topic, numQuestions, course: courseInfo });
     } catch (llmErr) {
       // If LLM fails, produce higher-quality, topic-specific fallback questions
-      console.warn('LLM generation failed or unavailable, falling back:', llmErr.message);
+      console.warn('LLM generation failed or unavailable, falling back:', llmErr.code || llmErr.message);
       const t = (topic || 'the topic').trim();
       const tl = t.toLowerCase();
+      fallbackReason = llmErr.code === 'insufficient_quota' ? 'OpenAI quota exceeded' : llmErr.code === 'invalid_api_key' ? 'Invalid OpenAI API key' : llmErr.message || 'LLM unavailable';
+
 
       const shuffle = (arr) => {
         const a = arr.slice();
@@ -292,7 +295,7 @@ export const generateQuestions = async (req, res) => {
       if (!Array.isArray(normalized) || normalized.length === 0) {
         console.error('No questions produced by generator', { topic, numQuestions, courseId });
         // Return success with empty list so frontend can handle gracefully
-        return res.status(200).json({ questions: [], message: 'No questions produced by generator (LLM may be unavailable).' });
+        return res.status(200).json({ questions: [], message: 'No questions produced by generator (LLM may be unavailable).', fallbackReason });
       }
 
       // Log a short preview for debugging
@@ -324,7 +327,7 @@ export const generateQuestions = async (req, res) => {
       if (cleaned.length === 0) {
         console.error('No valid questions after cleaning', { topic, numQuestions });
         // Provide a graceful response instead of a hard 500 so frontend can show a friendly message
-        return res.status(200).json({ questions: [], message: 'No valid questions generated after cleaning. Check server logs for details.' });
+        return res.status(200).json({ questions: [], message: 'No valid questions generated after cleaning. Check server logs for details.', fallbackReason });
       }
 
       // ensure no duplicates by question text
@@ -339,15 +342,15 @@ export const generateQuestions = async (req, res) => {
       console.log(`Saving ${uniqueByText.length} generated questions (after cleaning, preview):`, uniqueByText.slice(0,3).map(q => ({ text: q.text, options: q.options, correctAnswer: q.correctAnswer })));
 
       const saved = await Question.insertMany(uniqueByText);
-      return res.json({ questions: saved });
+      return res.json({ questions: saved, fallbackReason });
     } catch (dbErr) {
       console.error('Failed to save generated questions:', dbErr);
       // Return a safe success response so frontend can handle gracefully without a 500
-      return res.status(200).json({ questions: [], message: 'Failed to save generated questions. See server logs for details.', error: dbErr?.message || String(dbErr) });
+      return res.status(200).json({ questions: [], message: 'Failed to save generated questions. See server logs for details.', error: dbErr?.message || String(dbErr), fallbackReason });
     }
   } catch (err) {
     console.error('Unexpected error in generateQuestions:', err);
     // Return safe response instead of 500 to avoid breaking frontend flows
-    return res.status(200).json({ questions: [], message: 'Failed to generate questions due to server error.', error: err?.message || String(err) });
+    return res.status(200).json({ questions: [], message: 'Failed to generate questions due to server error.', error: err?.message || String(err), fallbackReason: err?.code || null });
   }
 };

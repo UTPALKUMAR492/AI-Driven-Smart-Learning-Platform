@@ -497,9 +497,6 @@
 }
 
 /* Progress bar larger and more visible */
-.course-header-content > div > div > div {
-  /* targeting the wrapper for the progress bar inserted earlier */
-}
 .course-header-content .progress-bar-lg {
   height: 12px;
   border-radius: 8px;

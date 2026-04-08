@@ -3,13 +3,13 @@
   min-height: 100vh;
   background: #f8f9fa;
   /* space for fixed header */
-  padding-top: 220px;
+  padding-top: 180px;
 }
 
 /* Header */
 .teacher-header-section {
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-  padding: 2rem 0 0;
+  padding: 1rem 0 0;
   position: fixed;
   top: 0;
   left: 0;
@@ -23,7 +23,7 @@
   display: flex;
   align-items: center;
   gap: 1.5rem;
-  margin-bottom: 2rem;
+  margin-bottom: 0rem;
 }
 
 .user-avatar {
@@ -42,6 +42,61 @@
 
 .user-info p {
   opacity: 0.8;
+}
+
+.header-top-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.4rem;
+  padding-bottom: 0.6rem;
+}
+
+.header-actions-right {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.ai-gen-btn,
+.refresh-btn,
+.logout-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ai-gen-btn {
+  background: #4a6cf7;
+  color: #fff;
+}
+
+.refresh-btn {
+  background: #ffffff;
+  color: #1a1a2e;
+  border: 1px solid #cbd5e1;
+}
+
+.refresh-btn.spin {
+  animation: spin 1s linear infinite;
+}
+
+.logout-btn {
+  background: #ef4444;
+  color: #fff;
+}
+
+.ai-gen-btn:hover,
+.refresh-btn:hover,
+.logout-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+}
+
+@keyframes spin {
+  from {transform: rotate(0deg);} to {transform: rotate(360deg);}
 }
 
 .dashboard-tabs {
@@ -432,10 +487,7 @@
 .modal-content textarea, .modal-content select, .modal-content input[type="number"] { padding:0.6rem; border-radius:8px; border:1px solid #e5e7eb }
 .modal-actions { grid-column:1/-1; margin-top:8px; display:flex; gap:8px }
 .modal-content button[type="submit"] { background: linear-gradient(90deg,#667eea,#764ba2); color:#fff; border:none; padding:8px 12px; border-radius:8px }
-.modal-content .btn-secondary { background:#f3f4f6; border:none; padding:8px 12px; border-radius:8px }
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-}
+.modal-content .btn-secondary { background:#f3f4f6; border: 1px solid #e5e7eb; padding:8px 12px; border-radius:8px }
 
 .lesson-number,
 .question-number {

@@ -22,7 +22,7 @@ import './TeacherDashboard.css'
 
 
 export default function TeacherDashboard() {
-  const { user } = useContext(AuthContext)
+  const { user, logout } = useContext(AuthContext)
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('overview')
@@ -561,6 +561,19 @@ export default function TeacherDashboard() {
       {/* Header */}
       <div className="teacher-header-section">
         <div className="container">
+          <div className="header-top-actions">
+            <div className="header-actions-right">
+              <button className="ai-gen-btn" onClick={() => setShowAIGen(true)}>
+                🤖 AI Generate Questions
+              </button>
+              <button className={`refresh-btn ${loading ? 'spin' : ''}`} onClick={fetchDashboardData} disabled={loading}>
+                🔄 {loading ? 'Refreshing...' : 'Refresh'}
+              </button>
+              <button className="logout-btn" onClick={logout}>
+                🚪 Logout
+              </button>
+            </div>
+          </div>
           <div className="header-content">
             <img
               src={user?.avatar || `https://ui-avatars.com/api/?name=${user?.name || 'Teacher'}&background=667eea&color=fff&size=200`}
@@ -573,9 +586,6 @@ export default function TeacherDashboard() {
             </div>
           </div>
           <div className="dashboard-tabs">
-            <button className="ai-gen-btn" onClick={() => setShowAIGen(true)} style={{ float: 'right', background: '#4A6CF7', color: '#fff', borderRadius: 4, padding: '6px 14px', marginLeft: 8 }}>
-              🤖 AI Generate Questions
-            </button>
             <button
               className={`tab ${activeTab === 'overview' ? 'active' : ''}`}
               onClick={() => setActiveTab('overview')}
